@@ -51,7 +51,7 @@ Recommended worker settings:
 - Worker type: `Serverless`
 - Container image: `your-docker-user/clause-model-tracking:runpod-v1`
 - GPU: start with `A40`, `RTX 4090`, or better
-- Volume/network storage: recommended if you do not preload models
+- Volume/network storage: attach a RunPod network volume if you do not preload models
 - Idle timeout: long enough to avoid repeated cold-start downloads if models are not baked in
 
 Optional environment variables:
@@ -61,12 +61,13 @@ Optional environment variables:
 - `S3_REGION=us-east-1`
 - `S3_BUCKET=truefaceswapvideo-schoollm-738149121200`
 - `S3_PREFIX=truefaceswapvideo`
+- `MODEL_STORAGE_ROOT=/runpod-volume/models`: store Hugging Face and model assets on the RunPod network volume
 - `CHAMP_POSE_EXTRACTOR`: absolute path to a working Champ video-to-motion extractor if your Champ fork differs from the assumed path
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
 - `PIPELINE_BASE64_OUTPUT_MAX_BYTES`: cap for inline base64 responses
 
-If you deploy from GitHub, prefer `PRELOAD_MODELS=0` and let the worker fetch weights on startup or via attached storage. RunPod’s current GitHub integration documentation notes a 160-minute build limit and an 80 GB image limit, so baking all model assets into the image is the riskier path for this project.
+If you deploy from GitHub, prefer `PRELOAD_MODELS=0` and let the worker fetch weights on startup onto the attached network volume. RunPod’s current GitHub integration documentation notes a 160-minute build limit and an 80 GB image limit, so baking all model assets into the image is the riskier path for this project.
 
 With the S3 settings above, you do not need to send `output_upload_url` per request. The worker will upload outputs to:
 
@@ -87,7 +88,8 @@ Your repo is already on GitHub, so the simplest path is usually:
 5. Use branch `main`.
 6. Keep `Dockerfile Path` as the repo root `Dockerfile`.
 7. Choose endpoint type `Queue`.
-8. Select the GPU types you want and deploy.
+8. Attach a network volume so the worker can store multi-GB model files at `/runpod-volume`.
+9. Select the GPU types you want and deploy.
 
 RunPod’s GitHub integration docs also note that updates are not pushed automatically after a normal commit. To update a GitHub-backed endpoint, create a new GitHub release or redeploy from the console.
 
@@ -129,3 +131,4 @@ curl -X GET "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$JOB_ID" \
 - If the Champ repo you clone does not contain a compatible extractor, send precomputed motion sequences instead of raw driving video.
 - If output videos are large, keep `return_base64=false` and rely on the default S3 upload.
 - `AWS_PROFILE=schoollm` only works if the worker also has the matching AWS config and credentials available. On RunPod, standard AWS environment credentials are usually more reliable than profile-only configuration.
+- If you do not attach a network volume and you rely on runtime model download, the worker can fail with `OSError: [Errno 28] No space left on device`.

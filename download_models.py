@@ -7,7 +7,9 @@ Use this during image build time or on first container boot.
 
 from __future__ import annotations
 
+import os
 import argparse
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -16,12 +18,53 @@ from huggingface_hub import hf_hub_download, snapshot_download
 WORKSPACE = Path("/workspace")
 CHAMP_DIR = Path("/workspace/champ")
 RETALKING_DIR = Path("/workspace/video-retalking")
-PRETRAINED_DIR = CHAMP_DIR / "pretrained_models"
-WEIGHTS_DIR = RETALKING_DIR / "checkpoints"
+RUNPOD_VOLUME_DIR = Path("/runpod-volume")
+DEFAULT_MODEL_STORAGE_ROOT = (
+    RUNPOD_VOLUME_DIR / "models" if RUNPOD_VOLUME_DIR.exists() else WORKSPACE / "model-storage"
+)
+MODEL_STORAGE_ROOT = Path(os.getenv("MODEL_STORAGE_ROOT", str(DEFAULT_MODEL_STORAGE_ROOT)))
+PRETRAINED_DIR = MODEL_STORAGE_ROOT / "champ" / "pretrained_models"
+WEIGHTS_DIR = MODEL_STORAGE_ROOT / "video-retalking" / "checkpoints"
 
 
 def log(message: str):
     print(f"\n[download_models] {message}", flush=True)
+
+
+def prepare_storage_layout():
+    PRETRAINED_DIR.mkdir(parents=True, exist_ok=True)
+    WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    os.environ.setdefault("HF_HOME", str(MODEL_STORAGE_ROOT / "hf-cache"))
+    os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(MODEL_STORAGE_ROOT / "hf-cache" / "hub"))
+
+    champ_target = CHAMP_DIR / "pretrained_models"
+    retalking_target = RETALKING_DIR / "checkpoints"
+    _ensure_symlink(champ_target, PRETRAINED_DIR)
+    _ensure_symlink(retalking_target, WEIGHTS_DIR)
+
+
+def _ensure_symlink(target_path: Path, source_path: Path):
+    if target_path.is_symlink():
+        if target_path.resolve() == source_path.resolve():
+            return
+        target_path.unlink()
+    elif target_path.exists():
+        if target_path.is_dir():
+            source_path.mkdir(parents=True, exist_ok=True)
+            for child in target_path.iterdir():
+                destination = source_path / child.name
+                if destination.exists():
+                    continue
+                shutil.move(str(child), str(destination))
+            target_path.rmdir()
+        else:
+            raise RuntimeError(
+                f"Cannot replace non-directory path with symlink: {target_path}"
+            )
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.symlink_to(source_path, target_is_directory=True)
 
 
 def snapshot(repo_id: str, destination: Path, **kwargs):
@@ -57,6 +100,7 @@ def smpl_model_present() -> bool:
 
 def download_champ_models():
     log("Downloading Champ model weights")
+    prepare_storage_layout()
     PRETRAINED_DIR.mkdir(parents=True, exist_ok=True)
 
     log("  -> Stable Diffusion 1.5 base model")
@@ -97,6 +141,7 @@ def download_champ_models():
 
 def download_retalking_models():
     log("Downloading VideoRetalking checkpoints")
+    prepare_storage_layout()
     WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
     checkpoints = [
@@ -130,6 +175,7 @@ def download_retalking_models():
 
 
 if __name__ == "__main__":
+    prepare_storage_layout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--champ", action="store_true", help="Download Champ weights")
     parser.add_argument("--retalking", action="store_true", help="Download VideoRetalking weights")

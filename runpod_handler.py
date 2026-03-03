@@ -22,7 +22,13 @@ import boto3
 import runpod
 from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
 
-from download_models import missing_champ_artifacts, missing_retalking_artifacts, smpl_model_present
+from download_models import (
+    MODEL_STORAGE_ROOT,
+    missing_champ_artifacts,
+    missing_retalking_artifacts,
+    prepare_storage_layout,
+    smpl_model_present,
+)
 from pipeline import OUTPUTS_DIR, WORKSPACE, ensure_dirs, run_pipeline, validate_motion_sequences
 
 logging.basicConfig(
@@ -174,6 +180,9 @@ def ensure_model_assets():
     global _MODELS_READY
     if _MODELS_READY:
         return
+
+    prepare_storage_layout()
+    log.info("Model storage root: %s", MODEL_STORAGE_ROOT)
 
     missing_champ = missing_champ_artifacts()
     missing_retalking = missing_retalking_artifacts()
