@@ -47,6 +47,7 @@ WORKDIR /workspace/video-retalking
 RUN pip install -r requirements.txt
 
 RUN pip install \
+    boto3==1.34.131 \
     huggingface_hub==0.21.4 \
     omegaconf==2.3.0 \
     einops==0.7.0 \

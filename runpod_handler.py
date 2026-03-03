@@ -18,7 +18,9 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
+import boto3
 import runpod
+from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
 
 from download_models import missing_champ_artifacts, missing_retalking_artifacts, smpl_model_present
 from pipeline import OUTPUTS_DIR, WORKSPACE, ensure_dirs, run_pipeline, validate_motion_sequences
@@ -33,6 +35,12 @@ INPUTS_DIR = Path(os.getenv("PIPELINE_INPUT_DIR", str(WORKSPACE / "inputs")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_DOWNLOAD_TIMEOUT_SECONDS", "600"))
 BASE64_OUTPUT_MAX_BYTES = int(os.getenv("PIPELINE_BASE64_OUTPUT_MAX_BYTES", "16000000"))
 DOWNLOAD_MODELS_ON_START = os.getenv("DOWNLOAD_MODELS_ON_START", "1")
+STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "").strip().lower()
+AWS_PROFILE = os.getenv("AWS_PROFILE")
+S3_REGION = os.getenv("S3_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+S3_BUCKET = os.getenv("S3_BUCKET")
+S3_PREFIX = os.getenv("S3_PREFIX", "").strip("/")
+S3_PRESIGN_TTL_SECONDS = int(os.getenv("S3_PRESIGN_TTL_SECONDS", "0"))
 _MODELS_READY = False
 
 
@@ -48,6 +56,11 @@ def _sanitize_filename(name: Optional[str], default_name: str) -> str:
     candidate = (name or default_name).strip()
     safe = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in candidate)
     return safe or default_name
+
+
+def _sanitize_key_part(value: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "._-/" else "_" for ch in value.strip())
+    return safe.strip("/") or "job"
 
 
 def _as_bool(value: Any) -> bool:
@@ -72,6 +85,89 @@ def _download_to_file(url: str, destination: Path):
     )
     with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
         destination.write_bytes(response.read())
+
+
+def _build_default_s3_key(job_id: str, output_path: Path) -> str:
+    key_parts = []
+    if S3_PREFIX:
+        key_parts.append(S3_PREFIX)
+    key_parts.append(_sanitize_key_part(job_id))
+    key_parts.append(output_path.name)
+    return "/".join(key_parts)
+
+
+def _aws_session():
+    session_kwargs: dict[str, Any] = {}
+    if AWS_PROFILE:
+        session_kwargs["profile_name"] = AWS_PROFILE
+    if S3_REGION:
+        session_kwargs["region_name"] = S3_REGION
+    try:
+        return boto3.Session(**session_kwargs)
+    except ProfileNotFound as exc:
+        raise RuntimeError(
+            f"AWS profile '{AWS_PROFILE}' was requested but is not available in the worker. "
+            "Provide mounted AWS config files or standard AWS credentials env vars."
+        ) from exc
+
+
+def _upload_output_to_s3(path: Path, bucket: str, key: str) -> dict[str, Any]:
+    s3_client = _aws_session().client("s3")
+    extra_args = {
+        "ContentType": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+    }
+
+    try:
+        s3_client.upload_file(str(path), bucket, key, ExtraArgs=extra_args)
+    except (BotoCoreError, ClientError) as exc:
+        raise RuntimeError(f"S3 upload failed for s3://{bucket}/{key}: {exc}") from exc
+
+    result = {
+        "uploaded": True,
+        "backend": "s3",
+        "bucket": bucket,
+        "key": key,
+        "region": S3_REGION,
+        "s3_uri": f"s3://{bucket}/{key}",
+    }
+
+    if S3_PRESIGN_TTL_SECONDS > 0:
+        try:
+            result["presigned_url"] = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=S3_PRESIGN_TTL_SECONDS,
+            )
+        except (BotoCoreError, ClientError) as exc:
+            log.warning("Failed to generate presigned URL for s3://%s/%s: %s", bucket, key, exc)
+
+    return result
+
+
+def _upload_output_via_http(path: Path, upload_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    method = str(_coalesce(payload, "output_upload_method") or "PUT").upper()
+    extra_headers = payload.get("output_upload_headers") or {}
+    headers = {
+        "Content-Type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        **extra_headers,
+    }
+
+    data = path.read_bytes()
+    request = urllib.request.Request(upload_url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+            status_code = getattr(response, "status", response.getcode())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Output upload failed with HTTP {exc.code}: {body}") from exc
+
+    return {
+        "uploaded": True,
+        "backend": "http",
+        "method": method,
+        "status_code": status_code,
+        "destination": upload_url,
+    }
 
 
 def ensure_model_assets():
@@ -187,31 +283,23 @@ def _encode_output_base64(path: Path) -> str:
 
 def _upload_output(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     upload_url = _coalesce(payload, "output_upload_url", "upload_url")
-    if upload_url is None:
-        return {}
+    if upload_url:
+        if upload_url.startswith("s3://"):
+            bucket_and_key = upload_url[5:]
+            if "/" not in bucket_and_key:
+                raise ValueError("S3 upload URL must be in the form s3://bucket/key")
+            bucket, key = bucket_and_key.split("/", 1)
+            return _upload_output_to_s3(path, bucket, key)
+        return _upload_output_via_http(path, upload_url, payload)
 
-    method = str(_coalesce(payload, "output_upload_method") or "PUT").upper()
-    extra_headers = payload.get("output_upload_headers") or {}
-    headers = {
-        "Content-Type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-        **extra_headers,
-    }
+    if STORAGE_BACKEND == "s3":
+        if not S3_BUCKET:
+            raise RuntimeError("STORAGE_BACKEND=s3 requires S3_BUCKET to be set.")
+        job_id = str(payload.get("job_id") or "runpod-job")
+        key = str(payload.get("output_s3_key") or _build_default_s3_key(job_id, path))
+        return _upload_output_to_s3(path, S3_BUCKET, key)
 
-    data = path.read_bytes()
-    request = urllib.request.Request(upload_url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-            status_code = getattr(response, "status", response.getcode())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Output upload failed with HTTP {exc.code}: {body}") from exc
-
-    return {
-        "uploaded": True,
-        "method": method,
-        "status_code": status_code,
-        "destination": upload_url,
-    }
+    return {}
 
 
 def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Optional[Path]]:

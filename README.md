@@ -56,12 +56,25 @@ Recommended worker settings:
 
 Optional environment variables:
 
+- `STORAGE_BACKEND=s3`: upload every finished video to S3 by default
+- `AWS_PROFILE=schoollm`: use the named AWS profile if AWS config files are available inside the worker
+- `S3_REGION=us-east-1`
+- `S3_BUCKET=truefaceswapvideo-schoollm-738149121200`
+- `S3_PREFIX=truefaceswapvideo`
 - `CHAMP_POSE_EXTRACTOR`: absolute path to a working Champ video-to-motion extractor if your Champ fork differs from the assumed path
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
 - `PIPELINE_BASE64_OUTPUT_MAX_BYTES`: cap for inline base64 responses
 
 If you deploy from GitHub, prefer `PRELOAD_MODELS=0` and let the worker fetch weights on startup or via attached storage. RunPod’s current GitHub integration documentation notes a 160-minute build limit and an 80 GB image limit, so baking all model assets into the image is the riskier path for this project.
+
+With the S3 settings above, you do not need to send `output_upload_url` per request. The worker will upload outputs to:
+
+```text
+s3://truefaceswapvideo-schoollm-738149121200/truefaceswapvideo/<job_id>/final_output.mp4
+```
+
+You can override the final object key on a job with `output_s3_key`.
 
 ## Deploy from GitHub
 
@@ -114,4 +127,5 @@ curl -X GET "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$JOB_ID" \
 ## Notes
 
 - If the Champ repo you clone does not contain a compatible extractor, send precomputed motion sequences instead of raw driving video.
-- If output videos are large, pass `output_upload_url` in the job input instead of `return_base64=true`.
+- If output videos are large, keep `return_base64=false` and rely on the default S3 upload.
+- `AWS_PROFILE=schoollm` only works if the worker also has the matching AWS config and credentials available. On RunPod, standard AWS environment credentials are usually more reliable than profile-only configuration.

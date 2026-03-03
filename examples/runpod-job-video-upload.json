@@ -3,11 +3,7 @@
     "job_id": "demo-upload-job",
     "reference_photo_url": "https://example.com/reference-photo.png",
     "driving_video_url": "https://example.com/driving-video.mp4",
-    "output_upload_url": "https://example-bucket.s3.amazonaws.com/output/final.mp4?signature=...",
-    "output_upload_method": "PUT",
-    "output_upload_headers": {
-      "x-amz-acl": "private"
-    },
+    "output_upload_url": "s3://truefaceswapvideo-schoollm-738149121200/truefaceswapvideo/demo-upload-job/final_output.mp4",
     "width": 512,
     "height": 768,
     "steps": 20,
