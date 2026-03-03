@@ -26,6 +26,7 @@ MODEL_STORAGE_ROOT = Path(os.getenv("MODEL_STORAGE_ROOT", str(DEFAULT_MODEL_STOR
 PRETRAINED_DIR = MODEL_STORAGE_ROOT / "champ" / "pretrained_models"
 WEIGHTS_DIR = MODEL_STORAGE_ROOT / "video-retalking" / "checkpoints"
 MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "30"))
+RETALKING_WEIGHTS_REPO = os.getenv("RETALKING_WEIGHTS_REPO", "camenduru/video-retalking")
 
 
 def log(message: str):
@@ -174,10 +175,16 @@ def download_retalking_models():
 
     for filename in checkpoints:
         log(f"  -> {filename}")
+        source_filename = (
+            filename
+            if RETALKING_WEIGHTS_REPO == "camenduru/video-retalking"
+            else f"checkpoints/{filename}"
+        )
+        destination_dir = WEIGHTS_DIR if RETALKING_WEIGHTS_REPO == "camenduru/video-retalking" else RETALKING_DIR
         hf_hub_download(
-            repo_id="OpenTalker/video-retalking",
-            filename=f"checkpoints/{filename}",
-            local_dir=str(RETALKING_DIR),
+            repo_id=RETALKING_WEIGHTS_REPO,
+            filename=source_filename,
+            local_dir=str(destination_dir),
         )
 
     bfm_zip = WEIGHTS_DIR / "BFM.zip"
