@@ -1,0 +1,14 @@
+{
+  "input": {
+    "job_id": "demo-motion-job",
+    "reference_photo_url": "https://example.com/reference-photo.png",
+    "motion_sequences_url": "https://example.com/motion-sequences.zip",
+    "audio_url": "https://example.com/driving-audio.wav",
+    "width": 512,
+    "height": 768,
+    "steps": 20,
+    "guidance_scale": 3.5,
+    "seed": 42,
+    "return_base64": false
+  }
+}

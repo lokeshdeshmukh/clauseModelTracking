@@ -1,0 +1,17 @@
+{
+  "input": {
+    "job_id": "demo-upload-job",
+    "reference_photo_url": "https://example.com/reference-photo.png",
+    "driving_video_url": "https://example.com/driving-video.mp4",
+    "output_upload_url": "https://example-bucket.s3.amazonaws.com/output/final.mp4?signature=...",
+    "output_upload_method": "PUT",
+    "output_upload_headers": {
+      "x-amz-acl": "private"
+    },
+    "width": 512,
+    "height": 768,
+    "steps": 20,
+    "guidance_scale": 3.5,
+    "seed": 42
+  }
+}

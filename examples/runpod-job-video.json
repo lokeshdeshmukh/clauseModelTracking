@@ -1,0 +1,13 @@
+{
+  "input": {
+    "job_id": "demo-video-job",
+    "reference_photo_url": "https://example.com/reference-photo.png",
+    "driving_video_url": "https://example.com/driving-video.mp4",
+    "width": 512,
+    "height": 768,
+    "steps": 20,
+    "guidance_scale": 3.5,
+    "seed": 42,
+    "return_base64": false
+  }
+}

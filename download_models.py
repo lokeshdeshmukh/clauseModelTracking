@@ -28,6 +28,33 @@ def snapshot(repo_id: str, destination: Path, **kwargs):
     snapshot_download(repo_id=repo_id, local_dir=str(destination), **kwargs)
 
 
+def missing_champ_artifacts() -> list[str]:
+    required = {
+        "stable-diffusion-v1-5": PRETRAINED_DIR / "stable-diffusion-v1-5" / "model_index.json",
+        "sd-vae-ft-mse": PRETRAINED_DIR / "sd-vae-ft-mse" / "config.json",
+        "image_encoder": PRETRAINED_DIR / "image_encoder" / "model_index.json",
+        "champ": PRETRAINED_DIR / "champ",
+        "dwpose detector": PRETRAINED_DIR / "dwpose" / "det_nano_192x192.onnx",
+        "dwpose pose": PRETRAINED_DIR / "dwpose" / "dw-ll_ucoco_384.onnx",
+    }
+    return [name for name, path in required.items() if not path.exists()]
+
+
+def missing_retalking_artifacts() -> list[str]:
+    required = {
+        "DNet.pt": WEIGHTS_DIR / "DNet.pt",
+        "LNet.pth": WEIGHTS_DIR / "LNet.pth",
+        "GFPGANv1.3.pth": WEIGHTS_DIR / "GFPGANv1.3.pth",
+        "RetinaFace-R50.pth": WEIGHTS_DIR / "RetinaFace-R50.pth",
+        "shape_predictor_68_face_landmarks.dat": WEIGHTS_DIR / "shape_predictor_68_face_landmarks.dat",
+    }
+    return [name for name, path in required.items() if not path.exists()]
+
+
+def smpl_model_present() -> bool:
+    return (PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl").exists()
+
+
 def download_champ_models():
     log("Downloading Champ model weights")
     PRETRAINED_DIR.mkdir(parents=True, exist_ok=True)

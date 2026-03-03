@@ -11,6 +11,7 @@ import logging
 import mimetypes
 import os
 import shutil
+import subprocess
 import urllib.error
 import urllib.request
 import zipfile
@@ -19,6 +20,7 @@ from typing import Any, Optional
 
 import runpod
 
+from download_models import missing_champ_artifacts, missing_retalking_artifacts, smpl_model_present
 from pipeline import OUTPUTS_DIR, WORKSPACE, ensure_dirs, run_pipeline, validate_motion_sequences
 
 logging.basicConfig(
@@ -30,6 +32,8 @@ log = logging.getLogger("runpod-handler")
 INPUTS_DIR = Path(os.getenv("PIPELINE_INPUT_DIR", str(WORKSPACE / "inputs")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_DOWNLOAD_TIMEOUT_SECONDS", "600"))
 BASE64_OUTPUT_MAX_BYTES = int(os.getenv("PIPELINE_BASE64_OUTPUT_MAX_BYTES", "16000000"))
+DOWNLOAD_MODELS_ON_START = os.getenv("DOWNLOAD_MODELS_ON_START", "1")
+_MODELS_READY = False
 
 
 def _coalesce(payload: dict[str, Any], *keys: str) -> Any:
@@ -68,6 +72,44 @@ def _download_to_file(url: str, destination: Path):
     )
     with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
         destination.write_bytes(response.read())
+
+
+def ensure_model_assets():
+    global _MODELS_READY
+    if _MODELS_READY:
+        return
+
+    missing_champ = missing_champ_artifacts()
+    missing_retalking = missing_retalking_artifacts()
+    if missing_champ or missing_retalking:
+        if not _as_bool(DOWNLOAD_MODELS_ON_START):
+            raise RuntimeError(
+                "Model assets are missing and DOWNLOAD_MODELS_ON_START is disabled. "
+                f"Missing Champ assets: {missing_champ or 'none'}. "
+                f"Missing VideoRetalking assets: {missing_retalking or 'none'}."
+            )
+
+        log.info("Missing model assets detected. Downloading required weights now.")
+        subprocess.run(
+            ["python", str(WORKSPACE / "download_models.py"), "--champ", "--retalking"],
+            check=True,
+        )
+        missing_champ = missing_champ_artifacts()
+        missing_retalking = missing_retalking_artifacts()
+        if missing_champ or missing_retalking:
+            raise RuntimeError(
+                "Model bootstrap completed but required assets are still missing. "
+                f"Missing Champ assets: {missing_champ or 'none'}. "
+                f"Missing VideoRetalking assets: {missing_retalking or 'none'}."
+            )
+
+    if not smpl_model_present():
+        log.warning(
+            "SMPL_NEUTRAL.pkl is not present under /workspace/champ/pretrained_models/smpl_models/. "
+            "Champ preprocessing/inference may fail until it is added."
+        )
+
+    _MODELS_READY = True
 
 
 def _decode_base64_to_file(encoded_value: str, destination: Path):
@@ -235,6 +277,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("input") or {}
     job_id = str(job.get("id") or payload.get("job_id") or "runpod-job")
     log.info("Received job %s", job_id)
+    ensure_model_assets()
     prepared = _prepare_inputs(job_id, payload)
 
     width = int(payload.get("width", 512))
@@ -280,4 +323,5 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
 if __name__ == "__main__":
     ensure_dirs(INPUTS_DIR, OUTPUTS_DIR)
+    ensure_model_assets()
     runpod.serverless.start({"handler": handler})
