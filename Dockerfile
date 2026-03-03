@@ -4,6 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
+    CMAKE_BUILD_PARALLEL_LEVEL=1 \
     CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
@@ -21,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-dev python3-distutils python3-pip \
     git git-lfs wget curl unzip ca-certificates \
     ffmpeg \
+    pkg-config libx11-dev libjpeg-dev \
+    libopenblas-dev liblapack-dev \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
     libgomp1 libegl1 \
     build-essential cmake ninja-build \
@@ -33,6 +36,13 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python \
 RUN pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 \
     --index-url https://download.pytorch.org/whl/cu118
 
+# Triton pulls in the Python `cmake` wrapper into /usr/local/bin/cmake, which
+# breaks dlib's build isolation. Force the system cmake binary instead.
+RUN rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack \
+    && ln -sf /usr/bin/cmake /usr/local/bin/cmake \
+    && ln -sf /usr/bin/ctest /usr/local/bin/ctest \
+    && ln -sf /usr/bin/cpack /usr/local/bin/cpack
+
 WORKDIR /workspace
 RUN git clone --depth 1 ${CHAMP_REPO} champ
 WORKDIR /workspace/champ
@@ -41,7 +51,9 @@ RUN pip install -r requirements.txt
 WORKDIR /workspace
 RUN git clone --depth 1 ${RETALKING_REPO} video-retalking
 WORKDIR /workspace/video-retalking
-RUN pip install -r requirements.txt
+RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
+    && pip install -r /tmp/video-retalking-requirements.txt \
+    && CMAKE_ARGS="-DDLIB_USE_CUDA=0" pip install --verbose dlib==19.24.0
 
 RUN pip install \
     boto3==1.34.131 \
