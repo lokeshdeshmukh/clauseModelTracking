@@ -14,9 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PIPELINE_INPUT_DIR=/workspace/inputs
 
 ARG CHAMP_REPO=https://github.com/fudan-generative-vision/champ.git
-ARG CHAMP_REF=main
 ARG RETALKING_REPO=https://github.com/OpenTalker/video-retalking.git
-ARG RETALKING_REF=main
 ARG PRELOAD_MODELS=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -36,12 +34,12 @@ RUN pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 \
     --index-url https://download.pytorch.org/whl/cu118
 
 WORKDIR /workspace
-RUN git clone --depth 1 --branch ${CHAMP_REF} ${CHAMP_REPO} champ
+RUN git clone --depth 1 ${CHAMP_REPO} champ
 WORKDIR /workspace/champ
 RUN pip install -r requirements.txt
 
 WORKDIR /workspace
-RUN git clone --depth 1 --branch ${RETALKING_REF} ${RETALKING_REPO} video-retalking
+RUN git clone --depth 1 ${RETALKING_REPO} video-retalking
 WORKDIR /workspace/video-retalking
 RUN pip install -r requirements.txt
 
