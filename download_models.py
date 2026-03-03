@@ -91,7 +91,7 @@ def missing_champ_artifacts() -> list[str]:
         "sd-vae-ft-mse": PRETRAINED_DIR / "sd-vae-ft-mse" / "config.json",
         "image_encoder": PRETRAINED_DIR / "image_encoder" / "model_index.json",
         "champ": PRETRAINED_DIR / "champ",
-        "dwpose detector": PRETRAINED_DIR / "dwpose" / "det_nano_192x192.onnx",
+        "dwpose detector": PRETRAINED_DIR / "dwpose" / "yolox_l.onnx",
         "dwpose pose": PRETRAINED_DIR / "dwpose" / "dw-ll_ucoco_384.onnx",
     }
     return [name for name, path in required.items() if not path.exists()]
@@ -136,7 +136,7 @@ def download_champ_models():
     log("  -> DWPose weights")
     dwpose_dir = PRETRAINED_DIR / "dwpose"
     dwpose_dir.mkdir(parents=True, exist_ok=True)
-    for filename in ("dw-ll_ucoco_384.onnx", "det_nano_192x192.onnx"):
+    for filename in ("dw-ll_ucoco_384.onnx", "yolox_l.onnx"):
         hf_hub_download(repo_id="yzd-v/DWPose", filename=filename, local_dir=str(dwpose_dir))
 
     log("  -> SMPL placeholder note")
