@@ -292,6 +292,10 @@ def _upload_output(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
             return _upload_output_to_s3(path, bucket, key)
         return _upload_output_via_http(path, upload_url, payload)
 
+    # Allow base64-only responses for local testing without requiring S3 credentials.
+    if _as_bool(payload.get("return_base64", False)):
+        return {}
+
     if STORAGE_BACKEND == "s3":
         if not S3_BUCKET:
             raise RuntimeError("STORAGE_BACKEND=s3 requires S3_BUCKET to be set.")
