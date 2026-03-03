@@ -1,11 +1,5 @@
-# ============================================================
-# Champ + VideoRetalking Pipeline - RunPod Docker Image
-# Base: CUDA 11.8 + cuDNN 8 + Ubuntu 22.04
-# ============================================================
-
 FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
 
-# ── System env ────────────────────────────────────────────
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -13,12 +7,21 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
-    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0"
+    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0" \
+    PIPELINE_WORKSPACE=/workspace \
+    PIPELINE_OUTPUT_DIR=/workspace/outputs \
+    PIPELINE_TEMP_DIR=/workspace/temp \
+    PIPELINE_INPUT_DIR=/workspace/inputs
 
-# ── System dependencies ────────────────────────────────────
+ARG CHAMP_REPO=https://github.com/fudan-generative-vision/champ.git
+ARG CHAMP_REF=main
+ARG RETALKING_REPO=https://github.com/OpenTalker/video-retalking.git
+ARG RETALKING_REF=main
+ARG PRELOAD_MODELS=0
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3.10-distutils python3-pip \
-    git git-lfs wget curl unzip \
+    git git-lfs wget curl unzip ca-certificates \
     ffmpeg libffmpeg-dev \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
     libgomp1 libegl1 \
@@ -27,28 +30,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
-    && update-alternatives --install /usr/bin/python  python  /usr/bin/python3.10 1 \
+    && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 \
     && python -m pip install --upgrade pip setuptools wheel
 
-# ── PyTorch (CUDA 11.8) ────────────────────────────────────
 RUN pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 \
     --index-url https://download.pytorch.org/whl/cu118
 
-# ── Clone Champ ────────────────────────────────────────────
 WORKDIR /workspace
-RUN git clone https://github.com/fudan-generative-vision/champ.git
+RUN git clone --depth 1 --branch ${CHAMP_REF} ${CHAMP_REPO} champ
 WORKDIR /workspace/champ
 RUN pip install -r requirements.txt
 
-# ── Clone VideoRetalking ───────────────────────────────────
 WORKDIR /workspace
-RUN git clone https://github.com/OpenTalker/video-retalking.git
+RUN git clone --depth 1 --branch ${RETALKING_REF} ${RETALKING_REPO} video-retalking
 WORKDIR /workspace/video-retalking
 RUN pip install -r requirements.txt
 
-# ── Extra shared dependencies ──────────────────────────────
 RUN pip install \
-    gradio==4.19.2 \
     huggingface_hub==0.21.4 \
     omegaconf==2.3.0 \
     einops==0.7.0 \
@@ -66,20 +64,14 @@ RUN pip install \
     gfpgan==1.3.8 \
     runpod==1.6.2
 
-# ── Copy project files ─────────────────────────────────────
 WORKDIR /workspace
-COPY scripts/           /workspace/scripts/
-COPY app/               /workspace/app/
-COPY configs/           /workspace/configs/
-COPY pipeline.py        /workspace/pipeline.py
+RUN mkdir -p /workspace/scripts /workspace/configs /workspace/inputs /workspace/outputs /workspace/temp
+COPY scripts/ /workspace/scripts/
+COPY configs/ /workspace/configs/
+COPY pipeline.py /workspace/pipeline.py
 COPY download_models.py /workspace/download_models.py
-COPY runpod_handler.py  /workspace/runpod_handler.py
+COPY runpod_handler.py /workspace/runpod_handler.py
 
-# ── Download model weights at build time ──────────────────
-# (comment out if you want runtime download to keep image smaller)
-RUN python /workspace/download_models.py --champ --retalking
+RUN if [ "${PRELOAD_MODELS}" = "1" ]; then python /workspace/download_models.py --champ --retalking; fi
 
-# ── Ports & entrypoint ─────────────────────────────────────
-EXPOSE 7860
-
-CMD ["python", "/workspace/runpod_handler.py"]
+CMD ["python", "-u", "/workspace/runpod_handler.py"]
