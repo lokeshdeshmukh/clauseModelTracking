@@ -25,6 +25,7 @@ DEFAULT_MODEL_STORAGE_ROOT = (
 MODEL_STORAGE_ROOT = Path(os.getenv("MODEL_STORAGE_ROOT", str(DEFAULT_MODEL_STORAGE_ROOT)))
 PRETRAINED_DIR = MODEL_STORAGE_ROOT / "champ" / "pretrained_models"
 WEIGHTS_DIR = MODEL_STORAGE_ROOT / "video-retalking" / "checkpoints"
+MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "30"))
 
 
 def log(message: str):
@@ -42,6 +43,19 @@ def prepare_storage_layout():
     retalking_target = RETALKING_DIR / "checkpoints"
     _ensure_symlink(champ_target, PRETRAINED_DIR)
     _ensure_symlink(retalking_target, WEIGHTS_DIR)
+    ensure_storage_capacity()
+
+
+def ensure_storage_capacity():
+    usage = shutil.disk_usage(MODEL_STORAGE_ROOT)
+    free_gb = usage.free / (1024 ** 3)
+    if free_gb < MODEL_STORAGE_MIN_FREE_GB:
+        raise RuntimeError(
+            f"Insufficient free space at {MODEL_STORAGE_ROOT}. "
+            f"Free space: {free_gb:.2f} GB, required minimum: {MODEL_STORAGE_MIN_FREE_GB:.2f} GB. "
+            "Attach or resize a RunPod network volume and point MODEL_STORAGE_ROOT to it "
+            "(recommended: /runpod-volume/models), or preload models outside the worker."
+        )
 
 
 def _ensure_symlink(target_path: Path, source_path: Path):
@@ -117,7 +131,7 @@ def download_champ_models():
     )
 
     log("  -> Champ motion guidance weights")
-    snapshot("fudan-generative-vision/champ", PRETRAINED_DIR / "champ")
+    snapshot("fudan-generative-ai/champ", PRETRAINED_DIR / "champ")
 
     log("  -> DWPose weights")
     dwpose_dir = PRETRAINED_DIR / "dwpose"
