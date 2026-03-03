@@ -20,17 +20,16 @@ ARG RETALKING_REF=main
 ARG PRELOAD_MODELS=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 python3.10-dev python3.10-distutils python3-pip \
+    python3 python3-dev python3-distutils python3-pip \
     git git-lfs wget curl unzip ca-certificates \
-    ffmpeg libffmpeg-dev \
+    ffmpeg \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
     libgomp1 libegl1 \
     build-essential cmake ninja-build \
     libgoogle-perftools-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 \
+RUN ln -sf /usr/bin/python3 /usr/bin/python \
     && python -m pip install --upgrade pip setuptools wheel
 
 RUN pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 \
