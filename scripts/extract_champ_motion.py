@@ -22,6 +22,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
+
 
 WORKSPACE = Path(os.getenv("PIPELINE_WORKSPACE", "/workspace"))
 CHAMP_DIR = Path(os.getenv("CHAMP_DIR", str(WORKSPACE / "champ")))
@@ -150,6 +152,41 @@ def validate_motion_outputs(path: Path):
         )
 
 
+def normalize_smpl_group_archive(smpl_results_dir: Path):
+    group_path = smpl_results_dir / "smpls_group.npz"
+    if not group_path.exists():
+        raise FileNotFoundError(f"Missing grouped SMPL results archive: {group_path}")
+
+    grouped = np.load(group_path, allow_pickle=True)
+    if "scaled_focal_length" in grouped.files:
+        return
+
+    frame_paths = sorted(
+        path
+        for path in smpl_results_dir.iterdir()
+        if path.suffix == ".npy"
+    )
+    if not frame_paths:
+        raise RuntimeError(f"No per-frame SMPL results found in {smpl_results_dir}")
+
+    focal_lengths = []
+    for frame_path in frame_paths:
+        frame_result = np.load(frame_path, allow_pickle=True).item()
+        if "scaled_focal_length" not in frame_result:
+            raise KeyError(
+                f"scaled_focal_length missing from per-frame SMPL result: {frame_path}"
+            )
+        focal_lengths.append(frame_result["scaled_focal_length"])
+
+    np.savez(
+        str(group_path),
+        smpl=grouped["smpl"],
+        camera=grouped["camera"],
+        scaled_focal_length=np.asarray(focal_lengths),
+    )
+    log(f"Normalized {group_path.name} with scaled_focal_length for smpl_transfer")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--video_path", required=True)
@@ -210,6 +247,7 @@ def main() -> int:
             cwd=CHAMP_DIR,
             env=env,
         )
+        normalize_smpl_group_archive(driving_root / "smpl_results")
 
         if smooth_smpl_enabled:
             run(
