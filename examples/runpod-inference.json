@@ -1,0 +1,14 @@
+{
+  "input": {
+    "job_id": "hf-motion-test",
+    "reference_photo_url": "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/IMG_7603.png",
+    "driving_video_url": "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/test100.mp4",
+    "motion_sequences_url": "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/motion-01.zip",
+    "width": 512,
+    "height": 768,
+    "steps": 20,
+    "guidance_scale": 3.5,
+    "seed": 42,
+    "return_base64": true
+  }
+}
