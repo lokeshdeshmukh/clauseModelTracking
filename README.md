@@ -41,7 +41,7 @@ docker build \
   -t your-docker-user/clause-model-tracking:runpod-v1 .
 ```
 
-`PRELOAD_MODELS=1` creates a much larger image. SMPL is still a manual drop-in under `/workspace/champ/pretrained_models/smpl_models/`.
+`PRELOAD_MODELS=1` creates a much larger image. The worker now seeds `SMPL_NEUTRAL.pkl` from `SMPL_MODEL_URL` when it is missing.
 
 ## Push the image
 
@@ -70,6 +70,7 @@ Optional environment variables:
 - `RUNPOD_HANDLER=inference`: run the final photo+motion inference endpoint
 - `RUNPOD_HANDLER=preprocess`: run the video preprocessing endpoint
 - `CHAMP_POSE_EXTRACTOR`: optional absolute path to a custom video-to-motion extractor if you want to override the built-in wrapper
+- `SMPL_MODEL_URL`: URL used to seed `SMPL_NEUTRAL.pkl` onto the RunPod volume when missing
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
 - `PIPELINE_BASE64_OUTPUT_MAX_BYTES`: cap for inline base64 responses

@@ -1,6 +1,7 @@
 .git
 __pycache__/
 *.py[cod]
+SMPL_NEUTRAL.pkl
 inputs/
 outputs/
 temp/

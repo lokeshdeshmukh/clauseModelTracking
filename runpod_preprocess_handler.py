@@ -297,7 +297,7 @@ def ensure_preprocess_assets():
     if not smpl_model_present():
         log.warning(
             "SMPL_NEUTRAL.pkl is not present under /workspace/champ/pretrained_models/smpl_models/. "
-            "Champ preprocessing may fail until it is added."
+            "Champ preprocessing may fail until it is seeded from SMPL_MODEL_URL or added manually."
         )
 
     _MODELS_READY = True

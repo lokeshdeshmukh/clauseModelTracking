@@ -41,6 +41,10 @@ FOURD_HUMANS_HMR2_CKPT = (
 )
 DETECTRON2_MODEL_PATH = PRETRAINED_DIR / "detectron2" / "model_final_f05665.pkl"
 DWPose_CKPT_DIR = CHAMP_DIR / "DWPose" / "ControlNet-v1-1-nightly" / "annotator" / "ckpts"
+DEFAULT_SMPL_MODEL_URL = (
+    "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/SMPL_NEUTRAL.pkl"
+)
+SMPL_MODEL_URL = os.getenv("SMPL_MODEL_URL", DEFAULT_SMPL_MODEL_URL).strip()
 MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "60"))
 RETALKING_WEIGHTS_REPO = os.getenv("RETALKING_WEIGHTS_REPO", "camenduru/video-retalking")
 
@@ -61,6 +65,7 @@ def prepare_storage_layout():
     retalking_target = RETALKING_DIR / "checkpoints"
     _ensure_symlink(champ_target, PRETRAINED_DIR)
     _ensure_symlink(retalking_target, WEIGHTS_DIR)
+    _seed_smpl_model(strict=False)
     if DWPose_CKPT_DIR.parent.exists():
         DWPose_CKPT_DIR.mkdir(parents=True, exist_ok=True)
         for filename in ("dw-ll_ucoco_384.onnx", "yolox_l.onnx"):
@@ -111,6 +116,25 @@ def _ensure_symlink(target_path: Path, source_path: Path):
     target_path.symlink_to(source_path, target_is_directory=True)
 
 
+def _seed_smpl_model(*, strict: bool):
+    if not SMPL_MODEL_URL:
+        return
+
+    smpl_dir = PRETRAINED_DIR / "smpl_models"
+    smpl_dir.mkdir(parents=True, exist_ok=True)
+    destination = smpl_dir / "SMPL_NEUTRAL.pkl"
+    if destination.exists():
+        return
+
+    try:
+        log(f"Seeding SMPL_NEUTRAL.pkl from {SMPL_MODEL_URL}")
+        _download_file(SMPL_MODEL_URL, destination)
+    except Exception as exc:
+        if strict:
+            raise RuntimeError(f"Failed to download SMPL_NEUTRAL.pkl from {SMPL_MODEL_URL}: {exc}") from exc
+        log(f"Warning: failed to seed SMPL_NEUTRAL.pkl from {SMPL_MODEL_URL}: {exc}")
+
+
 def snapshot(repo_id: str, destination: Path, **kwargs):
     snapshot_download(repo_id=repo_id, local_dir=str(destination), **kwargs)
 
@@ -142,6 +166,7 @@ def missing_preprocess_artifacts() -> list[str]:
     required = {
         "detectron2 model": DETECTRON2_MODEL_PATH,
         "HMR2 checkpoint": FOURD_HUMANS_HMR2_CKPT,
+        "SMPL model": PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl",
     }
     return [name for name, path in required.items() if not path.exists()]
 
@@ -204,11 +229,12 @@ def download_champ_models():
     smpl_dir.mkdir(parents=True, exist_ok=True)
     note_path = smpl_dir / "README.txt"
     note_path.write_text(
-        "SMPL model requires manual download.\n"
-        "Register at https://smpl.is.tue.mpg.de/ and place SMPL_NEUTRAL.pkl here.\n",
+        "SMPL model is seeded from SMPL_MODEL_URL when available.\n"
+        f"Current SMPL_MODEL_URL: {SMPL_MODEL_URL or '(not set)'}\n"
+        "If automatic seeding fails, place SMPL_NEUTRAL.pkl here manually.\n",
         encoding="utf-8",
     )
-    log(f"  -> Manual step required: {note_path}")
+    log(f"  -> SMPL model note: {note_path}")
 
     log("Champ model download complete")
 
@@ -238,27 +264,17 @@ def download_preprocess_models():
             env=_preprocess_env(),
         )
 
-    smpl_dir = PRETRAINED_DIR / "smpl_models"
-    smpl_dir.mkdir(parents=True, exist_ok=True)
     fourd_humans_smpl_dir = FOURD_HUMANS_CACHE / "data" / "smpl"
     fourd_humans_smpl_dir.mkdir(parents=True, exist_ok=True)
-    note_text = (
-        "SMPL model requires manual download.\n"
-        "Register at https://smpl.is.tue.mpg.de/ and place SMPL_NEUTRAL.pkl here.\n"
-    )
-    if not smpl_model_present():
-        (smpl_dir / "README.txt").write_text(note_text, encoding="utf-8")
-        (fourd_humans_smpl_dir / "README.txt").write_text(note_text, encoding="utf-8")
-        log(f"  -> Manual step required: {smpl_dir / 'README.txt'}")
+    _seed_smpl_model(strict=True)
+    source = PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl"
+    destination = fourd_humans_smpl_dir / "SMPL_NEUTRAL.pkl"
+    if destination.is_symlink() and destination.resolve() == source.resolve():
+        pass
     else:
-        source = PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl"
-        destination = fourd_humans_smpl_dir / "SMPL_NEUTRAL.pkl"
-        if destination.is_symlink() and destination.resolve() == source.resolve():
-            pass
-        else:
-            if destination.exists() or destination.is_symlink():
-                destination.unlink()
-            destination.symlink_to(source)
+        if destination.exists() or destination.is_symlink():
+            destination.unlink()
+        destination.symlink_to(source)
 
     prepare_storage_layout()
     log("Champ preprocessing dependency download complete")
