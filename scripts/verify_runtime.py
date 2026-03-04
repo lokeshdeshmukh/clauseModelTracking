@@ -58,14 +58,30 @@ def check_torch_family_versions():
         for name in ("torch", "torchvision", "torchaudio")
     }
     normalized = {name: version.split("+", 1)[0] for name, version in versions.items()}
-    major_minor = {
-        name: ".".join(version.split(".")[:2])
-        for name, version in normalized.items()
-    }
-    if len(set(major_minor.values())) != 1:
+    torch_mm = ".".join(normalized["torch"].split(".")[:2])
+    torchaudio_mm = ".".join(normalized["torchaudio"].split(".")[:2])
+    torchvision_mm = ".".join(normalized["torchvision"].split(".")[:2])
+
+    if torchaudio_mm != torch_mm:
         raise RuntimeError(
-            "Torch package mismatch: "
-            + ", ".join(f"{name}={versions[name]}" for name in ("torch", "torchvision", "torchaudio"))
+            "torch and torchaudio do not match: "
+            + ", ".join(f"{name}={versions[name]}" for name in ("torch", "torchaudio"))
+        )
+
+    torchvision_compat = {
+        "2.0": "0.15",
+        "2.1": "0.16",
+        "2.2": "0.17",
+        "2.3": "0.18",
+        "2.4": "0.19",
+        "2.5": "0.20",
+        "2.6": "0.21",
+    }
+    expected_vision_mm = torchvision_compat.get(torch_mm)
+    if expected_vision_mm and torchvision_mm != expected_vision_mm:
+        raise RuntimeError(
+            "torchvision does not match torch: "
+            + ", ".join(f"{name}={versions[name]}" for name in ("torch", "torchvision"))
         )
 
 
