@@ -72,14 +72,14 @@ RUN pip install --force-reinstall torch==2.2.2+cu118 torchvision==0.17.2+cu118 t
 RUN pip install \
     boto3==1.34.131 \
     huggingface_hub==0.21.4 \
-    omegaconf==2.3.0 \
-    einops==0.7.0 \
-    diffusers==0.27.2 \
-    accelerate==0.27.2 \
-    transformers==4.38.2 \
+    omegaconf==2.2.3 \
+    einops==0.4.1 \
+    diffusers==0.24.0 \
+    accelerate==0.21.0 \
+    transformers==4.30.2 \
     controlnet-aux==0.0.7 \
     safetensors==0.4.2 \
-    imageio==2.34.0 \
+    imageio==2.33.0 \
     imageio-ffmpeg==0.4.9 \
     mediapipe==0.10.9 \
     facexlib==0.3.0 \

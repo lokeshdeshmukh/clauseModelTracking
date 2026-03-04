@@ -52,6 +52,10 @@ def import_hmr2():
     from hmr2.models import download_models  # noqa: F401
 
 
+def check_diffusers_positionnet():
+    from diffusers.models.embeddings import PositionNet  # noqa: F401
+
+
 def check_torch_family_versions():
     versions = {
         name: importlib.metadata.version(name)
@@ -99,6 +103,7 @@ def main() -> int:
         ("torchvision import", lambda: import_module("torchvision")),
         ("torchaudio import", lambda: import_module("torchaudio")),
         ("torch family version match", check_torch_family_versions),
+        ("diffusers PositionNet import", check_diffusers_positionnet),
         ("detectron2 import", lambda: import_module("detectron2")),
         ("pytorch_lightning import", lambda: import_module("pytorch_lightning")),
         ("dlib import", lambda: import_module("dlib")),
