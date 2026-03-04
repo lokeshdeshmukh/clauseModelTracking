@@ -1,5 +1,9 @@
 """
-RunPod serverless entrypoint for the Champ + VideoRetalking pipeline.
+RunPod serverless entrypoint for Champ motion preprocessing.
+
+Endpoint A:
+  - input: driving video
+  - output: motion_sequences.zip and optional extracted audio
 """
 
 from __future__ import annotations
@@ -14,7 +18,6 @@ import shutil
 import subprocess
 import urllib.error
 import urllib.request
-import zipfile
 from pathlib import Path
 from typing import Any, Optional
 
@@ -22,27 +25,21 @@ import boto3
 import runpod
 from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
 
-from download_models import (
-    MODEL_STORAGE_ROOT,
-    missing_champ_artifacts,
-    missing_retalking_artifacts,
-    prepare_storage_layout,
-    smpl_model_present,
-)
+from download_models import MODEL_STORAGE_ROOT, prepare_storage_layout, smpl_model_present
 from pipeline import (
     OUTPUTS_DIR,
     WORKSPACE,
     ensure_dirs,
+    extract_audio,
+    extract_pose_sequences,
     has_native_pose_extractor,
-    run_pipeline,
-    validate_motion_sequences,
 )
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
 )
-log = logging.getLogger("runpod-handler")
+log = logging.getLogger("runpod-preprocess-handler")
 
 INPUTS_DIR = Path(os.getenv("PIPELINE_INPUT_DIR", str(WORKSPACE / "inputs")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_DOWNLOAD_TIMEOUT_SECONDS", "600"))
@@ -94,19 +91,10 @@ def _download_to_file(url: str, destination: Path):
     log.info("Downloading %s -> %s", url, destination)
     request = urllib.request.Request(
         url,
-        headers={"User-Agent": "runpod-champ-worker/1.0"},
+        headers={"User-Agent": "runpod-champ-preprocess-worker/1.0"},
     )
     with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
         destination.write_bytes(response.read())
-
-
-def _build_default_s3_key(job_id: str, output_path: Path) -> str:
-    key_parts = []
-    if S3_PREFIX:
-        key_parts.append(S3_PREFIX)
-    key_parts.append(_sanitize_key_part(job_id))
-    key_parts.append(output_path.name)
-    return "/".join(key_parts)
 
 
 def _aws_session():
@@ -124,7 +112,7 @@ def _aws_session():
         ) from exc
 
 
-def _upload_output_to_s3(path: Path, bucket: str, key: str) -> dict[str, Any]:
+def _upload_to_s3(path: Path, bucket: str, key: str) -> dict[str, Any]:
     s3_client = _aws_session().client("s3")
     extra_args = {
         "ContentType": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
@@ -157,14 +145,11 @@ def _upload_output_to_s3(path: Path, bucket: str, key: str) -> dict[str, Any]:
     return result
 
 
-def _upload_output_via_http(path: Path, upload_url: str, payload: dict[str, Any]) -> dict[str, Any]:
-    method = str(_coalesce(payload, "output_upload_method") or "PUT").upper()
-    extra_headers = payload.get("output_upload_headers") or {}
+def _upload_via_http(path: Path, upload_url: str, payload: dict[str, Any], method_key: str) -> dict[str, Any]:
+    method = str(payload.get(method_key) or "PUT").upper()
     headers = {
         "Content-Type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-        **extra_headers,
     }
-
     data = path.read_bytes()
     request = urllib.request.Request(upload_url, data=data, method=method, headers=headers)
     try:
@@ -183,45 +168,14 @@ def _upload_output_via_http(path: Path, upload_url: str, payload: dict[str, Any]
     }
 
 
-def ensure_model_assets():
-    global _MODELS_READY
-    if _MODELS_READY:
-        return
-
-    prepare_storage_layout()
-    log.info("Model storage root: %s", MODEL_STORAGE_ROOT)
-
-    missing_champ = missing_champ_artifacts()
-    missing_retalking = missing_retalking_artifacts()
-    if missing_champ or missing_retalking:
-        if not _as_bool(DOWNLOAD_MODELS_ON_START):
-            raise RuntimeError(
-                "Model assets are missing and DOWNLOAD_MODELS_ON_START is disabled. "
-                f"Missing Champ assets: {missing_champ or 'none'}. "
-                f"Missing VideoRetalking assets: {missing_retalking or 'none'}."
-            )
-
-        log.info("Missing model assets detected. Downloading required weights now.")
-        subprocess.run(
-            ["python", str(WORKSPACE / "download_models.py"), "--champ", "--retalking"],
-            check=True,
+def _encode_output_base64(path: Path) -> str:
+    size = path.stat().st_size
+    if size > BASE64_OUTPUT_MAX_BYTES:
+        raise ValueError(
+            f"Output file is {size} bytes which exceeds PIPELINE_BASE64_OUTPUT_MAX_BYTES="
+            f"{BASE64_OUTPUT_MAX_BYTES}. Upload the file instead of returning base64."
         )
-        missing_champ = missing_champ_artifacts()
-        missing_retalking = missing_retalking_artifacts()
-        if missing_champ or missing_retalking:
-            raise RuntimeError(
-                "Model bootstrap completed but required assets are still missing. "
-                f"Missing Champ assets: {missing_champ or 'none'}. "
-                f"Missing VideoRetalking assets: {missing_retalking or 'none'}."
-            )
-
-    if has_native_pose_extractor() and not smpl_model_present():
-        log.warning(
-            "SMPL_NEUTRAL.pkl is not present under /workspace/champ/pretrained_models/smpl_models/. "
-            "Champ preprocessing may fail until it is added."
-        )
-
-    _MODELS_READY = True
+    return base64.b64encode(path.read_bytes()).decode("ascii")
 
 
 def _decode_base64_to_file(encoded_value: str, destination: Path):
@@ -264,78 +218,78 @@ def _materialize_input_file(
     return destination
 
 
-def _looks_like_motion_dir(path: Path) -> bool:
-    required = ("dwpose", "depth", "mask", "normal", "semantic_map")
-    return all((path / name).exists() for name in required)
+def _default_output_key(job_id: str, filename: str) -> str:
+    key_parts = []
+    if S3_PREFIX:
+        key_parts.append(S3_PREFIX)
+    key_parts.append(_sanitize_key_part(job_id))
+    key_parts.append(filename)
+    return "/".join(key_parts)
 
 
-def _extract_motion_sequences(archive_path: Path, destination_dir: Path) -> Path:
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive_path, "r") as archive:
-        archive.extractall(destination_dir)
-
-    if _looks_like_motion_dir(destination_dir):
-        return destination_dir
-
-    children = [path for path in destination_dir.iterdir() if path.is_dir()]
-    if len(children) == 1 and _looks_like_motion_dir(children[0]):
-        return children[0]
-
-    raise ValueError(
-        "Motion sequences archive is missing required directories: "
-        "dwpose, depth, mask, normal, semantic_map"
-    )
-
-
-def _encode_output_base64(path: Path) -> str:
-    size = path.stat().st_size
-    if size > BASE64_OUTPUT_MAX_BYTES:
-        raise ValueError(
-            f"Output file is {size} bytes which exceeds PIPELINE_BASE64_OUTPUT_MAX_BYTES="
-            f"{BASE64_OUTPUT_MAX_BYTES}. Provide output_upload_url instead."
-        )
-    return base64.b64encode(path.read_bytes()).decode("ascii")
-
-
-def _upload_output(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    upload_url = _coalesce(payload, "output_upload_url", "upload_url")
+def _upload_artifact(
+    path: Path,
+    payload: dict[str, Any],
+    *,
+    job_id: str,
+    upload_url_keys: tuple[str, ...],
+    method_key: str,
+    default_s3_key_key: str,
+) -> dict[str, Any]:
+    upload_url = _coalesce(payload, *upload_url_keys)
     if upload_url:
         if upload_url.startswith("s3://"):
             bucket_and_key = upload_url[5:]
             if "/" not in bucket_and_key:
                 raise ValueError("S3 upload URL must be in the form s3://bucket/key")
             bucket, key = bucket_and_key.split("/", 1)
-            return _upload_output_to_s3(path, bucket, key)
-        return _upload_output_via_http(path, upload_url, payload)
-
-    # Allow base64-only responses for local testing without requiring S3 credentials.
-    if _as_bool(payload.get("return_base64", False)):
-        return {}
+            return _upload_to_s3(path, bucket, key)
+        return _upload_via_http(path, upload_url, payload, method_key)
 
     if STORAGE_BACKEND == "s3":
         if not S3_BUCKET:
             raise RuntimeError("STORAGE_BACKEND=s3 requires S3_BUCKET to be set.")
-        job_id = str(payload.get("job_id") or "runpod-job")
-        key = str(payload.get("output_s3_key") or _build_default_s3_key(job_id, path))
-        return _upload_output_to_s3(path, S3_BUCKET, key)
+        key = str(payload.get(default_s3_key_key) or _default_output_key(job_id, path.name))
+        return _upload_to_s3(path, S3_BUCKET, key)
 
     return {}
 
 
-def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Optional[Path]]:
+def ensure_preprocess_assets():
+    global _MODELS_READY
+    if _MODELS_READY:
+        return
+
+    prepare_storage_layout()
+    log.info("Model storage root: %s", MODEL_STORAGE_ROOT)
+
+    if not has_native_pose_extractor():
+        raise RuntimeError(
+            "Endpoint A requires a real Champ video-to-motion extractor. "
+            "Set CHAMP_POSE_EXTRACTOR to a valid script in the container or add the "
+            "upstream extractor path to the image."
+        )
+
+    if _as_bool(DOWNLOAD_MODELS_ON_START):
+        log.info("Ensuring Champ preprocessing assets are available.")
+        subprocess.run(
+            ["python", str(WORKSPACE / "download_models.py"), "--champ"],
+            check=True,
+        )
+
+    if not smpl_model_present():
+        log.warning(
+            "SMPL_NEUTRAL.pkl is not present under /workspace/champ/pretrained_models/smpl_models/. "
+            "Champ preprocessing may fail until it is added."
+        )
+
+    _MODELS_READY = True
+
+
+def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Path]:
     job_input_dir = INPUTS_DIR / job_id
     shutil.rmtree(job_input_dir, ignore_errors=True)
     ensure_dirs(job_input_dir)
-
-    photo_path = _materialize_input_file(
-        payload,
-        job_input_dir,
-        url_keys=("reference_photo_url", "photo_url"),
-        base64_keys=("reference_photo_base64", "photo_base64"),
-        filename_keys=("reference_photo_filename", "photo_filename"),
-        default_name="reference_photo.png",
-        required=True,
-    )
 
     video_path = _materialize_input_file(
         payload,
@@ -344,94 +298,104 @@ def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Optional[
         base64_keys=("driving_video_base64", "video_base64"),
         filename_keys=("driving_video_filename", "video_filename"),
         default_name="driving_video.mp4",
-        required=False,
+        required=True,
     )
-
-    audio_path = _materialize_input_file(
-        payload,
-        job_input_dir,
-        url_keys=("audio_url",),
-        base64_keys=("audio_base64",),
-        filename_keys=("audio_filename",),
-        default_name="driving_audio.wav",
-        required=False,
-    )
-
-    motion_archive = _materialize_input_file(
-        payload,
-        job_input_dir,
-        url_keys=("motion_sequences_url",),
-        base64_keys=("motion_sequences_base64",),
-        filename_keys=("motion_sequences_filename",),
-        default_name="motion_sequences.zip",
-        required=False,
-    )
-
-    motion_dir = None
-    if motion_archive is not None:
-        motion_dir = _extract_motion_sequences(motion_archive, job_input_dir / "motion_sequences")
-        validate_motion_sequences(motion_dir)
 
     return {
         "job_input_dir": job_input_dir,
-        "photo_path": photo_path,
         "video_path": video_path,
-        "audio_path": audio_path,
-        "motion_dir": motion_dir,
     }
+
+
+def _zip_motion_sequences(source_dir: Path, destination: Path) -> Path:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    archive_base = destination.with_suffix("")
+    archive_path = Path(shutil.make_archive(str(archive_base), "zip", root_dir=source_dir))
+    if archive_path != destination:
+        shutil.move(str(archive_path), str(destination))
+    return destination
 
 
 def handler(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("input") or {}
-    job_id = str(job.get("id") or payload.get("job_id") or "runpod-job")
-    log.info("Received job %s", job_id)
-    ensure_model_assets()
+    job_id = str(job.get("id") or payload.get("job_id") or "runpod-preprocess-job")
+    log.info("Received preprocess job %s", job_id)
+    ensure_preprocess_assets()
     prepared = _prepare_inputs(job_id, payload)
 
-    width = int(payload.get("width", 512))
-    height = int(payload.get("height", 768))
-    steps = int(payload.get("steps", 20))
-    guidance_scale = float(payload.get("guidance_scale", 3.5))
-    seed = int(payload.get("seed", 42))
     keep_temp = _as_bool(payload.get("keep_temp", False))
+    extract_audio_enabled = _as_bool(payload.get("extract_audio", True))
 
-    output_path = run_pipeline(
-        reference_photo=prepared["photo_path"],
-        driving_video=prepared["video_path"],
-        audio_path=prepared["audio_path"],
-        motion_sequences_dir=prepared["motion_dir"],
-        output_dir=OUTPUTS_DIR,
-        job_id=job_id,
-        width=width,
-        height=height,
-        steps=steps,
-        guidance_scale=guidance_scale,
-        seed=seed,
-        keep_temp=keep_temp,
-    )
+    output_dir = OUTPUTS_DIR / job_id
+    temp_dir = OUTPUTS_DIR / f"{job_id}_temp"
+    ensure_dirs(output_dir, temp_dir)
 
-    result = {
-        "job_id": job_id,
-        "output_path": str(output_path),
-        "output_file_name": output_path.name,
-        "output_size_bytes": output_path.stat().st_size,
-    }
+    try:
+        motion_dir = extract_pose_sequences(prepared["video_path"], temp_dir)
+        motion_zip = _zip_motion_sequences(motion_dir, output_dir / "motion_sequences.zip")
 
-    upload_result = _upload_output(output_path, payload)
-    if upload_result:
-        result["upload"] = upload_result
+        audio_path = None
+        if extract_audio_enabled:
+            extracted_audio = extract_audio(prepared["video_path"], temp_dir)
+            audio_path = output_dir / "driving_audio.wav"
+            shutil.copy2(extracted_audio, audio_path)
 
-    if _as_bool(payload.get("return_base64", False)):
-        result["output_base64"] = _encode_output_base64(output_path)
+        result: dict[str, Any] = {
+            "job_id": job_id,
+            "motion_sequences_zip": {
+                "path": str(motion_zip),
+                "file_name": motion_zip.name,
+                "size_bytes": motion_zip.stat().st_size,
+            },
+        }
 
-    metadata_path = output_path.with_suffix(".json")
-    metadata_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
-    return result
+        motion_upload = _upload_artifact(
+            motion_zip,
+            payload,
+            job_id=job_id,
+            upload_url_keys=("motion_upload_url", "output_upload_url"),
+            method_key="motion_upload_method",
+            default_s3_key_key="motion_output_s3_key",
+        )
+        if motion_upload:
+            result["motion_sequences_zip"]["upload"] = motion_upload
+
+        if _as_bool(payload.get("return_base64", False)) or _as_bool(payload.get("return_motion_base64", False)):
+            result["motion_sequences_zip"]["base64"] = _encode_output_base64(motion_zip)
+
+        if audio_path is not None:
+            result["audio"] = {
+                "path": str(audio_path),
+                "file_name": audio_path.name,
+                "size_bytes": audio_path.stat().st_size,
+            }
+            audio_upload = _upload_artifact(
+                audio_path,
+                payload,
+                job_id=job_id,
+                upload_url_keys=("audio_upload_url",),
+                method_key="audio_upload_method",
+                default_s3_key_key="audio_output_s3_key",
+            )
+            if audio_upload:
+                result["audio"]["upload"] = audio_upload
+
+            if _as_bool(payload.get("return_base64", False)) or _as_bool(payload.get("return_audio_base64", False)):
+                result["audio"]["base64"] = _encode_output_base64(audio_path)
+
+        metadata_path = output_dir / "preprocess_result.json"
+        metadata_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        return result
+    finally:
+        if keep_temp or os.getenv("PIPELINE_KEEP_TEMP") == "1":
+            log.info("Keeping preprocess temp directory for inspection: %s", temp_dir)
+        else:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def main():
     ensure_dirs(INPUTS_DIR, OUTPUTS_DIR)
-    ensure_model_assets()
+    ensure_preprocess_assets()
     runpod.serverless.start({"handler": handler})
 
 

@@ -81,7 +81,9 @@ COPY configs/ /workspace/configs/
 COPY pipeline.py /workspace/pipeline.py
 COPY download_models.py /workspace/download_models.py
 COPY runpod_handler.py /workspace/runpod_handler.py
+COPY runpod_preprocess_handler.py /workspace/runpod_preprocess_handler.py
+COPY worker_entrypoint.py /workspace/worker_entrypoint.py
 
 RUN if [ "${PRELOAD_MODELS}" = "1" ]; then python /workspace/download_models.py --champ --retalking; fi
 
-CMD ["python", "-u", "/workspace/runpod_handler.py"]
+CMD ["python", "-u", "/workspace/worker_entrypoint.py"]

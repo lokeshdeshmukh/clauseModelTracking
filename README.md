@@ -1,6 +1,11 @@
 # RunPod deployment
 
-This repository builds a RunPod Serverless worker for a Champ + VideoRetalking pipeline.
+This repository builds a RunPod Serverless worker for a two-endpoint Champ + VideoRetalking pipeline.
+
+Recommended architecture:
+
+1. Endpoint A `preprocess`: accepts a driving video and produces `motion_sequences.zip` plus extracted audio
+2. Endpoint B `inference`: accepts a reference photo plus `motion_sequences.zip` and audio/video, then renders the final video
 
 ## What to deploy
 
@@ -62,6 +67,8 @@ Optional environment variables:
 - `S3_BUCKET=truefaceswapvideo-schoollm-738149121200`
 - `S3_PREFIX=truefaceswapvideo`
 - `MODEL_STORAGE_ROOT=/runpod-volume/models`: store Hugging Face and model assets on the RunPod network volume
+- `RUNPOD_HANDLER=inference`: run the final photo+motion inference endpoint
+- `RUNPOD_HANDLER=preprocess`: run the video preprocessing endpoint
 - `CHAMP_POSE_EXTRACTOR`: absolute path to a working Champ video-to-motion extractor if your Champ fork differs from the assumed path
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
@@ -93,18 +100,52 @@ Your repo is already on GitHub, so the simplest path is usually:
 
 RunPod’s GitHub integration docs also note that updates are not pushed automatically after a normal commit. To update a GitHub-backed endpoint, create a new GitHub release or redeploy from the console.
 
-## Request formats
+## Endpoint A: Preprocess video
 
-One input mode is supported by default:
+Set:
+
+- `RUNPOD_HANDLER=preprocess`
+
+Purpose:
+
+- input: `driving_video_url` or `driving_video_base64`
+- output: `motion_sequences.zip`
+- optional output: extracted `driving_audio.wav`
+
+Sample payload:
+
+- [`examples/runpod-job-preprocess-video.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-preprocess-video.json)
+
+Important:
+
+- Endpoint A requires a real Champ-compatible extractor.
+- Set `CHAMP_POSE_EXTRACTOR` to the extractor script path in the container if the default upstream path does not exist.
+- If no extractor is configured, Endpoint A will fail fast instead of pretending it can generate motion data.
+
+The preprocess output zip must contain:
+
+- `dwpose/`
+- `depth/`
+- `mask/`
+- `normal/`
+- `semantic_map/`
+
+## Endpoint B: Inference
+
+Set:
+
+- `RUNPOD_HANDLER=inference`
+
+Default supported request format:
 
 1. `photo + motion zip + audio`
 
-An optional second mode is available only if you add a real Champ video-to-motion
-extractor to the container and point `CHAMP_POSE_EXTRACTOR` at it:
+Optional request format:
 
-2. `photo + video`
+2. `photo + motion zip + driving video`
+   In this mode, the worker extracts audio from the supplied video and uses the provided motion zip for body motion.
 
-Sample payloads are in [`examples/runpod-job-video.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-video.json) and [`examples/runpod-job-motion-audio.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-motion-audio.json).
+Sample payloads are in [`examples/runpod-job-motion-audio.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-motion-audio.json) and [`examples/runpod-job-video.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-video.json).
 
 The motion archive must unpack to a directory containing:
 
@@ -132,7 +173,8 @@ curl -X GET "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$JOB_ID" \
 
 ## Notes
 
-- If the Champ repo you clone does not contain a compatible extractor, raw driving-video jobs will fail validation. Send precomputed motion sequences instead.
+- If the Champ repo you clone does not contain a compatible extractor, use Endpoint A only after configuring `CHAMP_POSE_EXTRACTOR`.
+- Endpoint B does not create motion sequences from raw video by default. It consumes the output of Endpoint A.
 - If output videos are large, keep `return_base64=false` and rely on the default S3 upload.
 - `AWS_PROFILE=schoollm` only works if the worker also has the matching AWS config and credentials available. On RunPod, standard AWS environment credentials are usually more reliable than profile-only configuration.
 - If you do not attach a network volume and you rely on runtime model download, the worker can fail with `OSError: [Errno 28] No space left on device`.
