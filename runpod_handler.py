@@ -269,17 +269,36 @@ def _looks_like_motion_dir(path: Path) -> bool:
     return all((path / name).exists() for name in required)
 
 
+def _iter_motion_dir_candidates(root: Path) -> list[Path]:
+    def allowed(path: Path) -> bool:
+        return path.is_dir() and path.name not in {"__MACOSX"} and not path.name.startswith(".")
+
+    candidates: list[Path] = []
+    queue: list[tuple[Path, int]] = [(root, 0)]
+
+    while queue:
+        current, depth = queue.pop(0)
+        if _looks_like_motion_dir(current):
+            candidates.append(current)
+            continue
+        if depth >= 3:
+            continue
+        for child in current.iterdir():
+            if allowed(child):
+                queue.append((child, depth + 1))
+
+    return candidates
+
+
 def _extract_motion_sequences(archive_path: Path, destination_dir: Path) -> Path:
     destination_dir.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive_path, "r") as archive:
         archive.extractall(destination_dir)
 
-    if _looks_like_motion_dir(destination_dir):
-        return destination_dir
-
-    children = [path for path in destination_dir.iterdir() if path.is_dir()]
-    if len(children) == 1 and _looks_like_motion_dir(children[0]):
-        return children[0]
+    candidates = _iter_motion_dir_candidates(destination_dir)
+    if candidates:
+        candidates.sort(key=lambda path: (len(path.relative_to(destination_dir).parts), str(path)))
+        return candidates[0]
 
     raise ValueError(
         "Motion sequences archive is missing required directories: "
