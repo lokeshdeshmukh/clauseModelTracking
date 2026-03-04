@@ -25,7 +25,7 @@ DEFAULT_MODEL_STORAGE_ROOT = (
 MODEL_STORAGE_ROOT = Path(os.getenv("MODEL_STORAGE_ROOT", str(DEFAULT_MODEL_STORAGE_ROOT)))
 PRETRAINED_DIR = MODEL_STORAGE_ROOT / "champ" / "pretrained_models"
 WEIGHTS_DIR = MODEL_STORAGE_ROOT / "video-retalking" / "checkpoints"
-MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "30"))
+MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "60"))
 RETALKING_WEIGHTS_REPO = os.getenv("RETALKING_WEIGHTS_REPO", "camenduru/video-retalking")
 
 
@@ -119,7 +119,17 @@ def download_champ_models():
     PRETRAINED_DIR.mkdir(parents=True, exist_ok=True)
 
     log("  -> Stable Diffusion 1.5 base model")
-    snapshot("runwayml/stable-diffusion-v1-5", PRETRAINED_DIR / "stable-diffusion-v1-5")
+    snapshot(
+        "runwayml/stable-diffusion-v1-5",
+        PRETRAINED_DIR / "stable-diffusion-v1-5",
+        ignore_patterns=[
+            "*.safetensors",
+            "*.ckpt",
+            "*.msgpack",
+            "onnx/*",
+            "flax/*",
+        ],
+    )
 
     log("  -> SD VAE")
     snapshot("stabilityai/sd-vae-ft-mse", PRETRAINED_DIR / "sd-vae-ft-mse")
