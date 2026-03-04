@@ -39,6 +39,16 @@ FOURD_HUMANS_HMR2_CKPT = (
     / "checkpoints"
     / "epoch=35-step=1000000.ckpt"
 )
+FOURD_HUMANS_MODEL_CONFIG = (
+    FOURD_HUMANS_CACHE
+    / "logs"
+    / "train"
+    / "multiruns"
+    / "hmr2"
+    / "0"
+    / "model_config.yaml"
+)
+FOURD_HUMANS_BUNDLE = FOURD_HUMANS_CACHE / "hmr2_data.tar.gz"
 DETECTRON2_MODEL_PATH = PRETRAINED_DIR / "detectron2" / "model_final_f05665.pkl"
 DWPose_CKPT_DIR = CHAMP_DIR / "DWPose" / "ControlNet-v1-1-nightly" / "annotator" / "ckpts"
 DEFAULT_SMPL_MODEL_URL = (
@@ -166,6 +176,7 @@ def missing_preprocess_artifacts() -> list[str]:
     required = {
         "detectron2 model": DETECTRON2_MODEL_PATH,
         "HMR2 checkpoint": FOURD_HUMANS_HMR2_CKPT,
+        "HMR2 model config": FOURD_HUMANS_MODEL_CONFIG,
         "SMPL model": PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl",
     }
     return [name for name, path in required.items() if not path.exists()]
@@ -185,6 +196,36 @@ def _preprocess_env() -> dict[str, str]:
     env = os.environ.copy()
     env["HOME"] = str(PREPROCESS_HOME)
     return env
+
+
+def _ensure_4d_humans_bundle_extracted():
+    if FOURD_HUMANS_HMR2_CKPT.exists() and FOURD_HUMANS_MODEL_CONFIG.exists():
+        return
+
+    FOURD_HUMANS_CACHE.mkdir(parents=True, exist_ok=True)
+    if FOURD_HUMANS_BUNDLE.exists():
+        log("  -> Extracting cached 4D-Humans bundle")
+        subprocess.run(
+            ["tar", "-xvf", str(FOURD_HUMANS_BUNDLE), "-C", str(FOURD_HUMANS_CACHE)],
+            check=True,
+        )
+    else:
+        log("  -> 4D-Humans checkpoint bundle")
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from hmr2.models import download_models; download_models()",
+            ],
+            check=True,
+            env=_preprocess_env(),
+        )
+
+    if not FOURD_HUMANS_HMR2_CKPT.exists() or not FOURD_HUMANS_MODEL_CONFIG.exists():
+        raise RuntimeError(
+            "4D-Humans bundle is incomplete after download/extraction. "
+            f"Expected checkpoint at {FOURD_HUMANS_HMR2_CKPT} and config at {FOURD_HUMANS_MODEL_CONFIG}."
+        )
 
 
 def download_champ_models():
@@ -252,17 +293,7 @@ def download_preprocess_models():
             DETECTRON2_MODEL_PATH,
         )
 
-    if not FOURD_HUMANS_HMR2_CKPT.exists():
-        log("  -> 4D-Humans checkpoint bundle")
-        subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                "from hmr2.models import download_models; download_models()",
-            ],
-            check=True,
-            env=_preprocess_env(),
-        )
+    _ensure_4d_humans_bundle_extracted()
 
     fourd_humans_smpl_dir = FOURD_HUMANS_CACHE / "data" / "smpl"
     fourd_humans_smpl_dir.mkdir(parents=True, exist_ok=True)
