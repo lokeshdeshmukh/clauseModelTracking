@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/bin/python3 /usr/bin/python \
     && python -m pip install --upgrade pip setuptools wheel
 
-RUN pip install torch==2.0.1+cu118 torchvision==0.15.2+cu118 torchaudio==2.0.2 \
+RUN pip install torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
     --index-url https://download.pytorch.org/whl/cu118
 
 # Triton pulls in the Python `cmake` wrapper into /usr/local/bin/cmake, which
@@ -49,7 +49,8 @@ RUN rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack \
 WORKDIR /workspace
 RUN git clone --depth 1 ${CHAMP_REPO} champ
 WORKDIR /workspace/champ
-RUN pip install -r requirements.txt
+RUN grep -vE '^(torch|torchvision)==' requirements.txt > /tmp/champ-requirements.txt \
+    && pip install -r /tmp/champ-requirements.txt
 RUN git clone --depth 1 ${DWPose_REPO} DWPose
 
 WORKDIR /workspace
@@ -64,6 +65,9 @@ WORKDIR /workspace/video-retalking
 RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
     && pip install -r /tmp/video-retalking-requirements.txt \
     && CMAKE_ARGS="-DDLIB_USE_CUDA=0" pip install --verbose dlib==19.24.0
+
+RUN pip install --force-reinstall torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
+    --index-url https://download.pytorch.org/whl/cu118
 
 RUN pip install \
     boto3==1.34.131 \
