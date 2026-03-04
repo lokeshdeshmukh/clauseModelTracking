@@ -36,8 +36,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN ln -sf /usr/bin/python3 /usr/bin/python \
     && python -m pip install --upgrade pip setuptools wheel
 
-RUN pip install torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
-    --index-url https://download.pytorch.org/whl/cu118
+RUN python -m pip install --retries 10 --timeout 120 \
+    torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
+    --extra-index-url https://download.pytorch.org/whl/cu118 \
+    --trusted-host download.pytorch.org
 
 # Triton pulls in the Python `cmake` wrapper into /usr/local/bin/cmake, which
 # breaks dlib's build isolation. Force the system cmake binary instead.
@@ -66,8 +68,10 @@ RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
     && pip install -r /tmp/video-retalking-requirements.txt \
     && CMAKE_ARGS="-DDLIB_USE_CUDA=0" pip install --verbose dlib==19.24.0
 
-RUN pip install --force-reinstall torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
-    --index-url https://download.pytorch.org/whl/cu118
+RUN python -m pip install --force-reinstall --retries 10 --timeout 120 \
+    torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
+    --extra-index-url https://download.pytorch.org/whl/cu118 \
+    --trusted-host download.pytorch.org
 
 RUN pip install \
     boto3==1.34.131 \
