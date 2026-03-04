@@ -43,6 +43,22 @@ docker build \
 
 `PRELOAD_MODELS=1` creates a much larger image. The worker now seeds `SMPL_NEUTRAL.pkl` from `SMPL_MODEL_URL` when it is missing.
 
+## Verify the image
+
+Run the runtime smoke test inside the built container before deploying it:
+
+```bash
+docker run --rm your-docker-user/clause-model-tracking:runpod-v1 \
+  python /workspace/scripts/verify_runtime.py
+```
+
+This catches the most common image-level failures early:
+
+- broken Python imports for `torch`, `torchvision`, `torchaudio`, `detectron2`, `pytorch_lightning`, `dlib`
+- `4D-Humans` import-chain failures such as the `torchaudio` ABI mismatch
+- missing binaries like `ffmpeg` or `blender`
+- missing upstream checkouts like Champ, 4D-Humans, or DWPose
+
 ## Push the image
 
 ```bash
