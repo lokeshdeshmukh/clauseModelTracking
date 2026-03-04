@@ -4,7 +4,7 @@ This repository builds a RunPod Serverless worker for a two-endpoint Champ + Vid
 
 Recommended architecture:
 
-1. Endpoint A `preprocess`: accepts a driving video and produces `motion_sequences.zip` plus extracted audio
+1. Endpoint A `preprocess`: accepts a driving video plus an optional reference photo and produces `motion_sequences.zip` plus extracted audio
 2. Endpoint B `inference`: accepts a reference photo plus `motion_sequences.zip` and audio/video, then renders the final video
 
 ## What to deploy
@@ -69,7 +69,7 @@ Optional environment variables:
 - `MODEL_STORAGE_ROOT=/runpod-volume/models`: store Hugging Face and model assets on the RunPod network volume
 - `RUNPOD_HANDLER=inference`: run the final photo+motion inference endpoint
 - `RUNPOD_HANDLER=preprocess`: run the video preprocessing endpoint
-- `CHAMP_POSE_EXTRACTOR`: absolute path to a working Champ video-to-motion extractor if your Champ fork differs from the assumed path
+- `CHAMP_POSE_EXTRACTOR`: optional absolute path to a custom video-to-motion extractor if you want to override the built-in wrapper
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
 - `PIPELINE_BASE64_OUTPUT_MAX_BYTES`: cap for inline base64 responses
@@ -109,6 +109,7 @@ Set:
 Purpose:
 
 - input: `driving_video_url` or `driving_video_base64`
+- optional input: `reference_photo_url` or `reference_photo_base64`
 - output: `motion_sequences.zip`
 - optional output: extracted `driving_audio.wav`
 
@@ -118,9 +119,10 @@ Sample payload:
 
 Important:
 
-- Endpoint A requires a real Champ-compatible extractor.
-- Set `CHAMP_POSE_EXTRACTOR` to the extractor script path in the container if the default upstream path does not exist.
-- If no extractor is configured, Endpoint A will fail fast instead of pretending it can generate motion data.
+- Endpoint A uses the built-in `scripts/extract_champ_motion.py` wrapper by default.
+- That wrapper orchestrates Champ's released SMPL and rendering scripts, plus 4D-Humans, detectron2, Blender, and DWPose.
+- If you omit the reference photo, the first frame of the driving video is used as a fallback reference for SMPL transfer and rendering.
+- If you want a different extractor flow, override it with `CHAMP_POSE_EXTRACTOR`.
 
 The preprocess output zip must contain:
 
@@ -173,7 +175,7 @@ curl -X GET "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$JOB_ID" \
 
 ## Notes
 
-- If the Champ repo you clone does not contain a compatible extractor, use Endpoint A only after configuring `CHAMP_POSE_EXTRACTOR`.
+- Endpoint A now relies on the built-in preprocessing wrapper and its extra dependencies. Expect slower cold starts than the inference endpoint.
 - Endpoint B does not create motion sequences from raw video by default. It consumes the output of Endpoint A.
 - If output videos are large, keep `return_base64=false` and rely on the default S3 upload.
 - `AWS_PROFILE=schoollm` only works if the worker also has the matching AWS config and credentials available. On RunPod, standard AWS environment credentials are usually more reliable than profile-only configuration.

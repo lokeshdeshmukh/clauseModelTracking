@@ -39,7 +39,7 @@ TEMP_DIR = Path(os.getenv("PIPELINE_TEMP_DIR", str(WORKSPACE / "temp")))
 
 CHAMP_INFERENCE = CHAMP_DIR / "inference.py"
 RETALKING_INFERENCE = RETALKING_DIR / "inference.py"
-DEFAULT_POSE_EXTRACTOR = CHAMP_DIR / "scripts" / "data_processors" / "extract_data_from_video.py"
+DEFAULT_POSE_EXTRACTOR = SCRIPTS_DIR / "extract_champ_motion.py"
 FALLBACK_POSE_EXTRACTOR = SCRIPTS_DIR / "extract_pose_fallback.py"
 
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
@@ -206,7 +206,11 @@ def _resolve_pose_extractor() -> Path:
     return FALLBACK_POSE_EXTRACTOR
 
 
-def extract_pose_sequences(driving_video: Path, output_dir: Path) -> Path:
+def extract_pose_sequences(
+    driving_video: Path,
+    output_dir: Path,
+    reference_image: Optional[Path] = None,
+) -> Path:
     """
     Use a compatible pose extraction script to derive the motion guidance
     directories expected by Champ.
@@ -217,19 +221,20 @@ def extract_pose_sequences(driving_video: Path, output_dir: Path) -> Path:
 
     pose_extractor = _resolve_pose_extractor()
     extractor_cwd = CHAMP_DIR if pose_extractor.is_relative_to(CHAMP_DIR) else WORKSPACE
-    run(
-        [
-            "python",
-            str(pose_extractor),
-            "--video_path",
-            str(driving_video),
-            "--output_dir",
-            str(pose_dir),
-            "--pretrained_model_path",
-            str(CHAMP_DIR / "pretrained_models" / "dwpose"),
-        ],
-        cwd=extractor_cwd,
-    )
+    cmd = [
+        "python",
+        str(pose_extractor),
+        "--video_path",
+        str(driving_video),
+        "--output_dir",
+        str(pose_dir),
+        "--pretrained_model_path",
+        str(CHAMP_DIR / "pretrained_models" / "dwpose"),
+    ]
+    if reference_image is not None:
+        cmd.extend(["--reference_image_path", str(reference_image)])
+
+    run(cmd, cwd=extractor_cwd)
 
     validate_motion_sequences(pose_dir)
     log.info("Motion sequences extracted -> %s", pose_dir)
@@ -513,7 +518,11 @@ def run_pipeline(
         if pose_dir is None:
             if driving_video_path is None:
                 raise ValueError("A driving video is required when no motion sequences directory is provided.")
-            pose_dir = extract_pose_sequences(driving_video_path, temp_dir)
+            pose_dir = extract_pose_sequences(
+                driving_video_path,
+                temp_dir,
+                reference_image=reference_photo,
+            )
 
         animated_video = run_champ(
             reference_photo=reference_photo,

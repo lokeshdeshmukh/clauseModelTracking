@@ -2,7 +2,7 @@
 RunPod serverless entrypoint for Champ motion preprocessing.
 
 Endpoint A:
-  - input: driving video
+  - input: driving video, optional reference photo
   - output: motion_sequences.zip and optional extracted audio
 """
 
@@ -25,7 +25,12 @@ import boto3
 import runpod
 from botocore.exceptions import BotoCoreError, ClientError, ProfileNotFound
 
-from download_models import MODEL_STORAGE_ROOT, prepare_storage_layout, smpl_model_present
+from download_models import (
+    MODEL_STORAGE_ROOT,
+    missing_preprocess_artifacts,
+    prepare_storage_layout,
+    smpl_model_present,
+)
 from pipeline import (
     OUTPUTS_DIR,
     WORKSPACE,
@@ -270,12 +275,24 @@ def ensure_preprocess_assets():
             "upstream extractor path to the image."
         )
 
-    if _as_bool(DOWNLOAD_MODELS_ON_START):
+    missing_preprocess = missing_preprocess_artifacts()
+    if missing_preprocess:
+        if not _as_bool(DOWNLOAD_MODELS_ON_START):
+            raise RuntimeError(
+                "Preprocess assets are missing and DOWNLOAD_MODELS_ON_START is disabled. "
+                f"Missing preprocess assets: {missing_preprocess}."
+            )
         log.info("Ensuring Champ preprocessing assets are available.")
         subprocess.run(
-            ["python", str(WORKSPACE / "download_models.py"), "--champ"],
+            ["python", str(WORKSPACE / "download_models.py"), "--champ", "--preprocess"],
             check=True,
         )
+        missing_preprocess = missing_preprocess_artifacts()
+        if missing_preprocess:
+            raise RuntimeError(
+                "Preprocess asset bootstrap completed but required assets are still missing. "
+                f"Missing preprocess assets: {missing_preprocess}."
+            )
 
     if not smpl_model_present():
         log.warning(
@@ -286,10 +303,20 @@ def ensure_preprocess_assets():
     _MODELS_READY = True
 
 
-def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Path]:
+def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Optional[Path]]:
     job_input_dir = INPUTS_DIR / job_id
     shutil.rmtree(job_input_dir, ignore_errors=True)
     ensure_dirs(job_input_dir)
+
+    photo_path = _materialize_input_file(
+        payload,
+        job_input_dir,
+        url_keys=("reference_photo_url", "photo_url"),
+        base64_keys=("reference_photo_base64", "photo_base64"),
+        filename_keys=("reference_photo_filename", "photo_filename"),
+        default_name="reference_photo.png",
+        required=False,
+    )
 
     video_path = _materialize_input_file(
         payload,
@@ -303,6 +330,7 @@ def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Path]:
 
     return {
         "job_input_dir": job_input_dir,
+        "photo_path": photo_path,
         "video_path": video_path,
     }
 
@@ -331,7 +359,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
     ensure_dirs(output_dir, temp_dir)
 
     try:
-        motion_dir = extract_pose_sequences(prepared["video_path"], temp_dir)
+        motion_dir = extract_pose_sequences(
+            prepared["video_path"],
+            temp_dir,
+            reference_image=prepared["photo_path"],
+        )
         motion_zip = _zip_motion_sequences(motion_dir, output_dir / "motion_sequences.zip")
 
         audio_path = None

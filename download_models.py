@@ -11,6 +11,8 @@ import os
 import argparse
 import shutil
 import subprocess
+import sys
+import urllib.request
 from pathlib import Path
 
 from huggingface_hub import hf_hub_download, snapshot_download
@@ -25,6 +27,20 @@ DEFAULT_MODEL_STORAGE_ROOT = (
 MODEL_STORAGE_ROOT = Path(os.getenv("MODEL_STORAGE_ROOT", str(DEFAULT_MODEL_STORAGE_ROOT)))
 PRETRAINED_DIR = MODEL_STORAGE_ROOT / "champ" / "pretrained_models"
 WEIGHTS_DIR = MODEL_STORAGE_ROOT / "video-retalking" / "checkpoints"
+PREPROCESS_HOME = MODEL_STORAGE_ROOT / "preprocess-home"
+FOURD_HUMANS_CACHE = PREPROCESS_HOME / ".cache" / "4DHumans"
+FOURD_HUMANS_HMR2_CKPT = (
+    FOURD_HUMANS_CACHE
+    / "logs"
+    / "train"
+    / "multiruns"
+    / "hmr2"
+    / "0"
+    / "checkpoints"
+    / "epoch=35-step=1000000.ckpt"
+)
+DETECTRON2_MODEL_PATH = PRETRAINED_DIR / "detectron2" / "model_final_f05665.pkl"
+DWPose_CKPT_DIR = CHAMP_DIR / "DWPose" / "ControlNet-v1-1-nightly" / "annotator" / "ckpts"
 MODEL_STORAGE_MIN_FREE_GB = float(os.getenv("MODEL_STORAGE_MIN_FREE_GB", "60"))
 RETALKING_WEIGHTS_REPO = os.getenv("RETALKING_WEIGHTS_REPO", "camenduru/video-retalking")
 
@@ -36,6 +52,7 @@ def log(message: str):
 def prepare_storage_layout():
     PRETRAINED_DIR.mkdir(parents=True, exist_ok=True)
     WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
+    PREPROCESS_HOME.mkdir(parents=True, exist_ok=True)
 
     os.environ.setdefault("HF_HOME", str(MODEL_STORAGE_ROOT / "hf-cache"))
     os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(MODEL_STORAGE_ROOT / "hf-cache" / "hub"))
@@ -44,6 +61,18 @@ def prepare_storage_layout():
     retalking_target = RETALKING_DIR / "checkpoints"
     _ensure_symlink(champ_target, PRETRAINED_DIR)
     _ensure_symlink(retalking_target, WEIGHTS_DIR)
+    if DWPose_CKPT_DIR.parent.exists():
+        DWPose_CKPT_DIR.mkdir(parents=True, exist_ok=True)
+        for filename in ("dw-ll_ucoco_384.onnx", "yolox_l.onnx"):
+            source = PRETRAINED_DIR / "dwpose" / filename
+            destination = DWPose_CKPT_DIR / filename
+            if not source.exists():
+                continue
+            if destination.is_symlink() and destination.resolve() == source.resolve():
+                continue
+            if destination.exists() or destination.is_symlink():
+                destination.unlink()
+            destination.symlink_to(source)
     ensure_storage_capacity()
 
 
@@ -109,8 +138,28 @@ def missing_retalking_artifacts() -> list[str]:
     return [name for name, path in required.items() if not path.exists()]
 
 
+def missing_preprocess_artifacts() -> list[str]:
+    required = {
+        "detectron2 model": DETECTRON2_MODEL_PATH,
+        "HMR2 checkpoint": FOURD_HUMANS_HMR2_CKPT,
+    }
+    return [name for name, path in required.items() if not path.exists()]
+
+
 def smpl_model_present() -> bool:
     return (PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl").exists()
+
+
+def _download_file(url: str, destination: Path):
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with urllib.request.urlopen(url) as response:
+        destination.write_bytes(response.read())
+
+
+def _preprocess_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["HOME"] = str(PREPROCESS_HOME)
+    return env
 
 
 def download_champ_models():
@@ -164,6 +213,57 @@ def download_champ_models():
     log("Champ model download complete")
 
 
+def download_preprocess_models():
+    log("Downloading Champ preprocessing dependencies")
+    prepare_storage_layout()
+
+    detectron2_dir = PRETRAINED_DIR / "detectron2"
+    detectron2_dir.mkdir(parents=True, exist_ok=True)
+    if not DETECTRON2_MODEL_PATH.exists():
+        log("  -> Detectron2 model")
+        _download_file(
+            "https://dl.fbaipublicfiles.com/detectron2/ViTDet/COCO/cascade_mask_rcnn_vitdet_h/f328730692/model_final_f05665.pkl",
+            DETECTRON2_MODEL_PATH,
+        )
+
+    if not FOURD_HUMANS_HMR2_CKPT.exists():
+        log("  -> 4D-Humans checkpoint bundle")
+        subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from hmr2.models import download_models; download_models()",
+            ],
+            check=True,
+            env=_preprocess_env(),
+        )
+
+    smpl_dir = PRETRAINED_DIR / "smpl_models"
+    smpl_dir.mkdir(parents=True, exist_ok=True)
+    fourd_humans_smpl_dir = FOURD_HUMANS_CACHE / "data" / "smpl"
+    fourd_humans_smpl_dir.mkdir(parents=True, exist_ok=True)
+    note_text = (
+        "SMPL model requires manual download.\n"
+        "Register at https://smpl.is.tue.mpg.de/ and place SMPL_NEUTRAL.pkl here.\n"
+    )
+    if not smpl_model_present():
+        (smpl_dir / "README.txt").write_text(note_text, encoding="utf-8")
+        (fourd_humans_smpl_dir / "README.txt").write_text(note_text, encoding="utf-8")
+        log(f"  -> Manual step required: {smpl_dir / 'README.txt'}")
+    else:
+        source = PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl"
+        destination = fourd_humans_smpl_dir / "SMPL_NEUTRAL.pkl"
+        if destination.is_symlink() and destination.resolve() == source.resolve():
+            pass
+        else:
+            if destination.exists() or destination.is_symlink():
+                destination.unlink()
+            destination.symlink_to(source)
+
+    prepare_storage_layout()
+    log("Champ preprocessing dependency download complete")
+
+
 def download_retalking_models():
     log("Downloading VideoRetalking checkpoints")
     prepare_storage_layout()
@@ -209,13 +309,16 @@ if __name__ == "__main__":
     prepare_storage_layout()
     parser = argparse.ArgumentParser()
     parser.add_argument("--champ", action="store_true", help="Download Champ weights")
+    parser.add_argument("--preprocess", action="store_true", help="Download preprocessing assets")
     parser.add_argument("--retalking", action="store_true", help="Download VideoRetalking weights")
     parser.add_argument("--all", action="store_true", help="Download both sets of weights")
     args = parser.parse_args()
 
     if args.all or args.champ:
         download_champ_models()
+    if args.all or args.preprocess:
+        download_preprocess_models()
     if args.all or args.retalking:
         download_retalking_models()
-    if not any((args.all, args.champ, args.retalking)):
-        print("Usage: python download_models.py [--champ] [--retalking] [--all]")
+    if not any((args.all, args.champ, args.preprocess, args.retalking)):
+        print("Usage: python download_models.py [--champ] [--preprocess] [--retalking] [--all]")

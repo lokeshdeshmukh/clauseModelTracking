@@ -16,16 +16,19 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 ARG CHAMP_REPO=https://github.com/fudan-generative-vision/champ.git
 ARG RETALKING_REPO=https://github.com/OpenTalker/video-retalking.git
+ARG FOURD_HUMANS_REPO=https://github.com/shubham-goel/4D-Humans.git
+ARG DWPose_REPO=https://github.com/IDEA-Research/DWPose.git
 ARG PRELOAD_MODELS=0
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-dev python3-distutils python3-pip \
     git git-lfs wget curl unzip ca-certificates \
-    ffmpeg \
+    ffmpeg blender \
     pkg-config libx11-dev libjpeg-dev \
     libopenblas-dev liblapack-dev \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
-    libgomp1 libegl1 \
+    libgomp1 libegl1 libosmesa6 libosmesa6-dev \
+    gcc-12 g++-12 \
     build-essential cmake ninja-build \
     libgoogle-perftools-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -47,6 +50,12 @@ WORKDIR /workspace
 RUN git clone --depth 1 ${CHAMP_REPO} champ
 WORKDIR /workspace/champ
 RUN pip install -r requirements.txt
+RUN git clone --depth 1 ${DWPose_REPO} DWPose
+
+WORKDIR /workspace
+RUN git clone --depth 1 ${FOURD_HUMANS_REPO} 4D-Humans
+WORKDIR /workspace/4D-Humans
+RUN CC=gcc-12 CXX=g++-12 pip install -e .[all]
 
 WORKDIR /workspace
 RUN git clone --depth 1 ${RETALKING_REPO} video-retalking
@@ -84,6 +93,6 @@ COPY runpod_handler.py /workspace/runpod_handler.py
 COPY runpod_preprocess_handler.py /workspace/runpod_preprocess_handler.py
 COPY worker_entrypoint.py /workspace/worker_entrypoint.py
 
-RUN if [ "${PRELOAD_MODELS}" = "1" ]; then python /workspace/download_models.py --champ --retalking; fi
+RUN if [ "${PRELOAD_MODELS}" = "1" ]; then python /workspace/download_models.py --champ --preprocess --retalking; fi
 
 CMD ["python", "-u", "/workspace/worker_entrypoint.py"]

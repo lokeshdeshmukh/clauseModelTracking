@@ -1,7 +1,8 @@
 {
   "input": {
     "job_id": "demo-preprocess-job",
-    "driving_video_url": "https://example.com/driving-video.mp4",
+    "reference_photo_url": "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/IMG_7603.png",
+    "driving_video_url": "https://truefaceswapvideo-schoollm-738149121200.s3.us-east-1.amazonaws.com/test100.mp4",
     "extract_audio": true,
     "return_base64": false
   }
