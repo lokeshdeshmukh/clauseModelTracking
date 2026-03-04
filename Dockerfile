@@ -55,7 +55,8 @@ RUN git clone --depth 1 ${DWPose_REPO} DWPose
 WORKDIR /workspace
 RUN git clone --depth 1 ${FOURD_HUMANS_REPO} 4D-Humans
 WORKDIR /workspace/4D-Humans
-RUN CC=gcc-12 CXX=g++-12 pip install -e .[all]
+RUN pip install --no-build-isolation git+https://github.com/mattloper/chumpy \
+    && CC=gcc-12 CXX=g++-12 pip install --no-build-isolation -e .[all]
 
 WORKDIR /workspace
 RUN git clone --depth 1 ${RETALKING_REPO} video-retalking
