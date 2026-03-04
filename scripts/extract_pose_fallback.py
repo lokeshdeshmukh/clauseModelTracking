@@ -21,8 +21,10 @@ def main() -> int:
 
     print(
         "No compatible Champ pose extractor was found in the cloned repository.\n"
+        "This worker supports precomputed Champ motion directories with\n"
+        "dwpose/, depth/, mask/, normal/, and semantic_map/.\n"
         "Either set CHAMP_POSE_EXTRACTOR to a working extractor script or provide\n"
-        "precomputed motion sequences to the RunPod job input.",
+        "those precomputed motion sequences to the RunPod job input.",
         file=sys.stderr,
     )
     return 1

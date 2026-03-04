@@ -95,18 +95,22 @@ RunPod’s GitHub integration docs also note that updates are not pushed automat
 
 ## Request formats
 
-Two input modes are supported:
+One input mode is supported by default:
 
-1. `photo + video`
-2. `photo + motion zip + audio`
+1. `photo + motion zip + audio`
+
+An optional second mode is available only if you add a real Champ video-to-motion
+extractor to the container and point `CHAMP_POSE_EXTRACTOR` at it:
+
+2. `photo + video`
 
 Sample payloads are in [`examples/runpod-job-video.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-video.json) and [`examples/runpod-job-motion-audio.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-motion-audio.json).
 
 The motion archive must unpack to a directory containing:
 
 - `dwpose/`
-- `smpl/`
 - `depth/`
+- `mask/`
 - `normal/`
 - `semantic_map/`
 
@@ -116,7 +120,7 @@ The motion archive must unpack to a directory containing:
 curl -X POST "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/run" \
   -H "Authorization: Bearer $RUNPOD_API_KEY" \
   -H "Content-Type: application/json" \
-  -d @examples/runpod-job-video.json
+  -d @examples/runpod-job-motion-audio.json
 ```
 
 ## Poll result
@@ -128,7 +132,7 @@ curl -X GET "https://api.runpod.ai/v2/$RUNPOD_ENDPOINT_ID/status/$JOB_ID" \
 
 ## Notes
 
-- If the Champ repo you clone does not contain a compatible extractor, send precomputed motion sequences instead of raw driving video.
+- If the Champ repo you clone does not contain a compatible extractor, raw driving-video jobs will fail validation. Send precomputed motion sequences instead.
 - If output videos are large, keep `return_base64=false` and rely on the default S3 upload.
 - `AWS_PROFILE=schoollm` only works if the worker also has the matching AWS config and credentials available. On RunPod, standard AWS environment credentials are usually more reliable than profile-only configuration.
 - If you do not attach a network volume and you rely on runtime model download, the worker can fail with `OSError: [Errno 28] No space left on device`.

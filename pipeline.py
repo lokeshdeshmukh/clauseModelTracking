@@ -3,8 +3,8 @@ pipeline.py - Champ + VideoRetalking end-to-end pipeline.
 
 Inputs:
   - reference photo (required)
-  - driving video and/or precomputed motion sequences
-  - optional separate audio track
+  - precomputed motion sequences plus audio by default
+  - optional driving video only when a real Champ extractor is configured
 
 Output:
   - final animated video with body motion and lip sync
@@ -45,7 +45,7 @@ FALLBACK_POSE_EXTRACTOR = SCRIPTS_DIR / "extract_pose_fallback.py"
 PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".ogg"}
-MOTION_SEQUENCE_SUBDIRS = ("dwpose", "smpl", "depth", "normal", "semantic_map")
+MOTION_SEQUENCE_SUBDIRS = ("dwpose", "depth", "mask", "normal", "semantic_map")
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None):
@@ -132,6 +132,13 @@ def validate_motion_sequences(motion_sequences_dir: Path):
         )
 
 
+def has_native_pose_extractor() -> bool:
+    override = os.getenv("CHAMP_POSE_EXTRACTOR")
+    candidates = [Path(override)] if override else []
+    candidates.append(DEFAULT_POSE_EXTRACTOR)
+    return any(candidate.exists() for candidate in candidates)
+
+
 def validate_inputs(
     photo: Path,
     driving_video: Optional[Path] = None,
@@ -151,6 +158,12 @@ def validate_inputs(
         validate_motion_sequences(motion_sequences_dir)
     if audio_path is not None:
         _validate_audio(audio_path)
+    if motion_sequences_dir is None and not has_native_pose_extractor():
+        raise ValueError(
+            "This worker image does not include a compatible Champ video-to-motion extractor. "
+            "Provide precomputed motion sequences plus audio, or set CHAMP_POSE_EXTRACTOR to "
+            "a valid extractor script in the container."
+        )
 
     log.info("Inputs validated.")
 
@@ -184,16 +197,13 @@ def extract_audio(driving_video: Path, output_dir: Path) -> Path:
 def _resolve_pose_extractor() -> Path:
     override = os.getenv("CHAMP_POSE_EXTRACTOR")
     candidates = [Path(override)] if override else []
-    candidates.extend([DEFAULT_POSE_EXTRACTOR, FALLBACK_POSE_EXTRACTOR])
+    candidates.append(DEFAULT_POSE_EXTRACTOR)
 
     for candidate in candidates:
         if candidate.exists():
             return candidate
 
-    raise FileNotFoundError(
-        "No compatible pose extractor found. Set CHAMP_POSE_EXTRACTOR or "
-        "provide precomputed motion sequences."
-    )
+    return FALLBACK_POSE_EXTRACTOR
 
 
 def extract_pose_sequences(driving_video: Path, output_dir: Path) -> Path:
@@ -245,22 +255,24 @@ def _render_champ_config(
             f"pretrained_vae_path: '{pretrained_dir / 'sd-vae-ft-mse'}'",
             f"pretrained_base_model_path: '{pretrained_dir / 'stable-diffusion-v1-5'}'",
             f"image_encoder_path: '{pretrained_dir / 'image_encoder'}'",
-            f"denoising_unet_path: '{pretrained_dir / 'champ' / 'unet' / 'diffusion_pytorch_model.bin'}'",
-            f"reference_unet_path: '{pretrained_dir / 'champ' / 'reference_unet' / 'diffusion_pytorch_model.bin'}'",
-            f"pose_guider_path: '{pretrained_dir / 'champ' / 'pose_guider' / 'diffusion_pytorch_model.bin'}'",
-            f"motion_module_path: '{pretrained_dir / 'champ' / 'motion_module' / 'pytorch_model.bin'}'",
+            f"denoising_unet_path: '{pretrained_dir / 'champ' / 'denoising_unet.pth'}'",
+            f"reference_unet_path: '{pretrained_dir / 'champ' / 'reference_unet.pth'}'",
+            f"guidance_encoder_dwpose_path: '{pretrained_dir / 'champ' / 'guidance_encoder_dwpose.pth'}'",
+            f"guidance_encoder_depth_path: '{pretrained_dir / 'champ' / 'guidance_encoder_depth.pth'}'",
+            f"guidance_encoder_normal_path: '{pretrained_dir / 'champ' / 'guidance_encoder_normal.pth'}'",
+            f"guidance_encoder_semantic_map_path: '{pretrained_dir / 'champ' / 'guidance_encoder_semantic_map.pth'}'",
+            f"motion_module_path: '{pretrained_dir / 'champ' / 'motion_module.pth'}'",
             "",
             f"source_image: '{reference_photo}'",
-            f"driving_smpl_path: '{pose_dir / 'smpl'}'",
             f"driving_pose_dir: '{pose_dir / 'dwpose'}'",
             f"driving_depth_dir: '{pose_dir / 'depth'}'",
             f"driving_normal_dir: '{pose_dir / 'normal'}'",
-            f"driving_mask_dir: '{pose_dir / 'semantic_map'}'",
+            f"driving_mask_dir: '{pose_dir / 'mask'}'",
+            f"driving_semantic_map_dir: '{pose_dir / 'semantic_map'}'",
             "",
             f"output_dir: '{output_dir}'",
             f"seed: {seed}",
-            "guidance_types: ['pose', 'depth', 'normal', 'seg', 'smpl']",
-            "cond_type: 'smpl'",
+            "guidance_types: ['pose', 'depth', 'normal', 'seg']",
             "guidance_encoder_kwargs:",
             "  guidance_embedding_channels: 320",
             "  guidance_input_channels: 3",
@@ -285,7 +297,6 @@ def _render_champ_config(
             "",
             "weight_type:",
             "  pose: 1.0",
-            "  smpl: 1.0",
             "  depth: 1.0",
             "  normal: 1.0",
             "  seg: 1.0",
@@ -456,8 +467,8 @@ def run_pipeline(
     Run the full photo-to-video pipeline.
 
     You can either provide:
-      - a driving video and let the worker extract audio + motion sequences, or
-      - precomputed motion sequences plus a separate audio file.
+      - precomputed motion sequences plus a separate audio file, or
+      - a driving video if the container includes a real Champ extractor.
     """
     ensure_runtime_layout()
     t_start = time.time()
@@ -538,7 +549,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audio", help="Optional separate audio file")
     parser.add_argument(
         "--motion_dir",
-        help="Optional precomputed motion sequences directory containing dwpose/smpl/depth/normal/semantic_map",
+        help="Optional precomputed motion sequences directory containing dwpose/depth/mask/normal/semantic_map",
     )
     parser.add_argument("--output_dir", default=str(OUTPUTS_DIR))
     parser.add_argument("--job_id", help="Optional stable job identifier")

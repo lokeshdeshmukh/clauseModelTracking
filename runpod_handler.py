@@ -29,7 +29,14 @@ from download_models import (
     prepare_storage_layout,
     smpl_model_present,
 )
-from pipeline import OUTPUTS_DIR, WORKSPACE, ensure_dirs, run_pipeline, validate_motion_sequences
+from pipeline import (
+    OUTPUTS_DIR,
+    WORKSPACE,
+    ensure_dirs,
+    has_native_pose_extractor,
+    run_pipeline,
+    validate_motion_sequences,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -208,10 +215,10 @@ def ensure_model_assets():
                 f"Missing VideoRetalking assets: {missing_retalking or 'none'}."
             )
 
-    if not smpl_model_present():
+    if has_native_pose_extractor() and not smpl_model_present():
         log.warning(
             "SMPL_NEUTRAL.pkl is not present under /workspace/champ/pretrained_models/smpl_models/. "
-            "Champ preprocessing/inference may fail until it is added."
+            "Champ preprocessing may fail until it is added."
         )
 
     _MODELS_READY = True
@@ -258,7 +265,7 @@ def _materialize_input_file(
 
 
 def _looks_like_motion_dir(path: Path) -> bool:
-    required = ("dwpose", "smpl", "depth", "normal", "semantic_map")
+    required = ("dwpose", "depth", "mask", "normal", "semantic_map")
     return all((path / name).exists() for name in required)
 
 
@@ -276,7 +283,7 @@ def _extract_motion_sequences(archive_path: Path, destination_dir: Path) -> Path
 
     raise ValueError(
         "Motion sequences archive is missing required directories: "
-        "dwpose, smpl, depth, normal, semantic_map"
+        "dwpose, depth, mask, normal, semantic_map"
     )
 
 
