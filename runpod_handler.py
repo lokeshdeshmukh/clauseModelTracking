@@ -12,6 +12,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -46,8 +47,23 @@ log = logging.getLogger("runpod-handler")
 
 INPUTS_DIR = Path(os.getenv("PIPELINE_INPUT_DIR", str(WORKSPACE / "inputs")))
 DOWNLOAD_TIMEOUT_SECONDS = int(os.getenv("PIPELINE_DOWNLOAD_TIMEOUT_SECONDS", "600"))
+DOWNLOAD_RETRIES = int(os.getenv("PIPELINE_DOWNLOAD_RETRIES", "3"))
+DOWNLOAD_CHUNK_BYTES = int(os.getenv("PIPELINE_DOWNLOAD_CHUNK_BYTES", str(1024 * 1024)))
+DOWNLOAD_PROGRESS_BYTES = int(os.getenv("PIPELINE_DOWNLOAD_PROGRESS_BYTES", str(5 * 1024 * 1024)))
 BASE64_OUTPUT_MAX_BYTES = int(os.getenv("PIPELINE_BASE64_OUTPUT_MAX_BYTES", "16000000"))
 DOWNLOAD_MODELS_ON_START = os.getenv("DOWNLOAD_MODELS_ON_START", "1")
+DEFAULT_MOTION_EXAMPLE_ARCHIVE = Path(
+    os.getenv(
+        "DEFAULT_MOTION_EXAMPLE_ARCHIVE",
+        str(WORKSPACE / "examples" / "champ_motions_example" / "motion-01.zip"),
+    )
+)
+USE_CHAMP_MOTIONS_EXAMPLE = os.getenv("USE_CHAMP_MOTIONS_EXAMPLE", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 STORAGE_BACKEND = os.getenv("STORAGE_BACKEND", "").strip().lower()
 AWS_PROFILE = os.getenv("AWS_PROFILE")
 S3_REGION = os.getenv("S3_REGION") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
@@ -91,13 +107,78 @@ def _strip_data_uri(value: str) -> str:
 
 
 def _download_to_file(url: str, destination: Path):
-    log.info("Downloading %s -> %s", url, destination)
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "runpod-champ-worker/1.0"},
-    )
-    with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-        destination.write_bytes(response.read())
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = destination.parent / f"{destination.name}.part"
+
+    for attempt in range(1, DOWNLOAD_RETRIES + 1):
+        start = time.time()
+        downloaded = 0
+        last_progress = 0
+
+        log.info(
+            "Downloading %s -> %s (attempt %d/%d)",
+            url,
+            destination,
+            attempt,
+            DOWNLOAD_RETRIES,
+        )
+
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "runpod-champ-worker/1.0"},
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                content_length = response.headers.get("Content-Length")
+                expected_bytes = int(content_length) if content_length and content_length.isdigit() else None
+                with temp_path.open("wb") as out:
+                    while True:
+                        chunk = response.read(DOWNLOAD_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        downloaded += len(chunk)
+                        if downloaded - last_progress >= DOWNLOAD_PROGRESS_BYTES:
+                            if expected_bytes:
+                                pct = downloaded * 100.0 / expected_bytes
+                                log.info(
+                                    "Download progress for %s: %.1f%% (%d/%d bytes)",
+                                    destination.name,
+                                    pct,
+                                    downloaded,
+                                    expected_bytes,
+                                )
+                            else:
+                                log.info(
+                                    "Download progress for %s: %d bytes",
+                                    destination.name,
+                                    downloaded,
+                                )
+                            last_progress = downloaded
+
+            temp_path.replace(destination)
+            elapsed = time.time() - start
+            log.info("Download complete for %s (%d bytes in %.1fs)", destination.name, downloaded, elapsed)
+            return
+        except urllib.error.HTTPError as exc:
+            if temp_path.exists():
+                temp_path.unlink()
+            if 400 <= exc.code < 500 and exc.code not in {408, 429}:
+                raise
+            if attempt == DOWNLOAD_RETRIES:
+                raise RuntimeError(f"Failed to download {url} after {DOWNLOAD_RETRIES} attempts: HTTP {exc.code}") from exc
+            backoff = min(2 ** (attempt - 1), 8)
+            log.warning("Retrying download after HTTP %s (%ss backoff): %s", exc.code, backoff, url)
+            time.sleep(backoff)
+        except Exception as exc:  # noqa: BLE001
+            if temp_path.exists():
+                temp_path.unlink()
+            if attempt == DOWNLOAD_RETRIES:
+                raise RuntimeError(f"Failed to download {url} after {DOWNLOAD_RETRIES} attempts: {exc}") from exc
+            backoff = min(2 ** (attempt - 1), 8)
+            log.warning("Retrying download after error (%ss backoff): %s", backoff, url)
+            time.sleep(backoff)
 
 
 def _build_default_s3_key(job_id: str, output_path: Path) -> str:
@@ -385,6 +466,16 @@ def _prepare_inputs(job_id: str, payload: dict[str, Any]) -> dict[str, Optional[
         default_name="motion_sequences.zip",
         required=False,
     )
+
+    use_example_motion = USE_CHAMP_MOTIONS_EXAMPLE or _as_bool(payload.get("use_champ_motions_example", False))
+    if motion_archive is None and use_example_motion:
+        if not DEFAULT_MOTION_EXAMPLE_ARCHIVE.exists():
+            raise ValueError(
+                "Bundled motion example was requested but archive is missing: "
+                f"{DEFAULT_MOTION_EXAMPLE_ARCHIVE}"
+            )
+        log.info("Using bundled champ motion example: %s", DEFAULT_MOTION_EXAMPLE_ARCHIVE)
+        motion_archive = DEFAULT_MOTION_EXAMPLE_ARCHIVE
 
     motion_dir = None
     if motion_archive is not None:

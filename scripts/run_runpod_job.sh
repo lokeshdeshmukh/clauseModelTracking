@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEFAULT_PAYLOAD="$ROOT_DIR/examples/runpod-job-motion-audio.json"
+DEFAULT_PAYLOAD="$ROOT_DIR/examples/runpod-job-motion-bundled-example.json"
 DEFAULT_OUTPUT="$ROOT_DIR/final_output.mp4"
 POLL_INTERVAL_SECONDS=30
 
@@ -13,7 +13,7 @@ Usage:
   RUNPOD_API_KEY=... RUNPOD_ENDPOINT_ID=... scripts/run_runpod_job.sh [payload.json] [output.mp4]
 
 Arguments:
-  payload.json   Optional. Defaults to examples/runpod-job-motion-audio.json
+  payload.json   Optional. Defaults to examples/runpod-job-motion-bundled-example.json
   output.mp4     Optional. Defaults to final_output.mp4 in the repo root
 
 Behavior:

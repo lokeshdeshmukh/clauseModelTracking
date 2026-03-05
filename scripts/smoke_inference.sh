@@ -7,6 +7,7 @@ python /workspace/champ/inference.py --help >/dev/null
 echo "[smoke] Champ inference imports are healthy"
 
 python - <<'PY'
+import base64
 import tempfile
 import zipfile
 from pathlib import Path
@@ -18,6 +19,9 @@ import runpod_handler
 
 
 required_motion_dirs = ("dwpose", "depth", "mask", "normal", "semantic_map")
+tiny_png = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+F8QAAAAASUVORK5CYII="
+)
 required_config_keys = (
     "data",
     "base_model_path",
@@ -40,7 +44,7 @@ motion_root = tmp_root / "motion"
 for name in required_motion_dirs:
     folder = motion_root / name
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / "0001.png").touch()
+    (folder / "0001.png").write_bytes(tiny_png)
 
 cfg_text = pipeline._render_champ_config(
     reference_photo=reference,
@@ -69,7 +73,7 @@ archive = tmp_root / "motion.zip"
 with zipfile.ZipFile(archive, "w") as zf:
     zf.writestr("__MACOSX/._dummy", "")
     for motion_dir in required_motion_dirs:
-        zf.writestr(f"wrapper/motion-01/{motion_dir}/0001.png", "")
+        zf.writestr(f"wrapper/motion-01/{motion_dir}/0001.png", tiny_png)
 
 extracted_root = tmp_root / "extract"
 resolved_motion = runpod_handler._extract_motion_sequences(archive, extracted_root)

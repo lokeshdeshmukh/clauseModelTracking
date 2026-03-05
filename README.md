@@ -95,6 +95,8 @@ Optional environment variables:
 - `CHAMP_POSE_EXTRACTOR`: optional absolute path to a custom video-to-motion extractor if you want to override the built-in wrapper
 - `SMPL_MODEL_URL`: URL used to seed `SMPL_NEUTRAL.pkl` onto the RunPod volume when missing
 - `DOWNLOAD_MODELS_ON_START=1`: download missing weights when the worker starts
+- `USE_CHAMP_MOTIONS_EXAMPLE=1`: when motion input is missing, use the bundled `examples/champ_motions_example/motion-01.zip`
+- `DEFAULT_MOTION_EXAMPLE_ARCHIVE`: optional override path for the bundled motion archive
 - `PIPELINE_KEEP_TEMP=1`: keep temp artifacts for debugging
 - `PIPELINE_BASE64_OUTPUT_MAX_BYTES`: cap for inline base64 responses
 
@@ -172,6 +174,12 @@ Optional request format:
    In this mode, the worker extracts audio from the supplied video and uses the provided motion zip for body motion.
 
 Sample payloads are in [`examples/runpod-job-motion-audio.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-motion-audio.json) and [`examples/runpod-job-video.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-video.json).
+
+For quick validation without preprocessing, you can also use the bundled Champ motion sample:
+
+- set `input.use_champ_motions_example=true`
+- omit `motion_sequences_url` / `motion_sequences_base64`
+- use [`examples/runpod-job-motion-bundled-example.json`](/Volumes/Lokesh_1T_E/AI%20Projects/cloude_pipeline/examples/runpod-job-motion-bundled-example.json)
 
 The motion archive must unpack to a directory containing:
 

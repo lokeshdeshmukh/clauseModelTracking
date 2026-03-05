@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from PIL import Image, UnidentifiedImageError
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -46,6 +48,7 @@ PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 VIDEO_SUFFIXES = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 AUDIO_SUFFIXES = {".wav", ".mp3", ".aac", ".m4a", ".flac", ".ogg"}
 MOTION_SEQUENCE_SUBDIRS = ("dwpose", "depth", "mask", "normal", "semantic_map")
+MOTION_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None, env: Optional[dict[str, str]] = None):
@@ -115,6 +118,41 @@ def _validate_audio(audio_path: Path):
         raise ValueError(f"Unsupported audio format: {audio_path.suffix}")
 
 
+def _is_lfs_pointer_file(path: Path) -> bool:
+    try:
+        header = path.read_bytes()[:256].decode("utf-8", errors="ignore")
+    except OSError:
+        return False
+    return header.startswith("version https://git-lfs.github.com/spec/v1")
+
+
+def _validate_motion_frames(subdir_path: Path, subdir_name: str):
+    frame_files = sorted(
+        path for path in subdir_path.iterdir()
+        if path.is_file() and path.suffix.lower() in MOTION_IMAGE_SUFFIXES
+    )
+    if not frame_files:
+        raise ValueError(
+            f"Motion sequences subdir '{subdir_name}' does not contain image frames."
+        )
+
+    sample_files = frame_files[: min(3, len(frame_files))]
+    for frame_path in sample_files:
+        if _is_lfs_pointer_file(frame_path):
+            raise ValueError(
+                f"Motion frame appears to be a Git LFS pointer, not image data: {frame_path}. "
+                "Re-download the real files (not pointer files) before zipping."
+            )
+        try:
+            with Image.open(frame_path) as image:
+                image.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValueError(
+                f"Invalid motion frame in '{subdir_name}': {frame_path}. "
+                "Ensure the archive contains real image files."
+            ) from exc
+
+
 def validate_motion_sequences(motion_sequences_dir: Path):
     if not motion_sequences_dir.exists():
         raise FileNotFoundError(f"Motion sequences directory not found: {motion_sequences_dir}")
@@ -130,6 +168,9 @@ def validate_motion_sequences(motion_sequences_dir: Path):
             "Motion sequences directory is incomplete. Missing: "
             + ", ".join(missing)
         )
+
+    for subdir in MOTION_SEQUENCE_SUBDIRS:
+        _validate_motion_frames(motion_sequences_dir / subdir, subdir)
 
 
 def has_native_pose_extractor() -> bool:

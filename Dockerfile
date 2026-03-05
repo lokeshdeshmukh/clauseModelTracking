@@ -96,6 +96,7 @@ WORKDIR /workspace
 RUN mkdir -p /workspace/scripts /workspace/configs /workspace/inputs /workspace/outputs /workspace/temp
 COPY scripts/ /workspace/scripts/
 COPY configs/ /workspace/configs/
+COPY examples/ /workspace/examples/
 COPY pipeline.py /workspace/pipeline.py
 COPY download_models.py /workspace/download_models.py
 COPY runpod_handler.py /workspace/runpod_handler.py
