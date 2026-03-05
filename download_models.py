@@ -154,7 +154,13 @@ def missing_champ_artifacts() -> list[str]:
         "stable-diffusion-v1-5": PRETRAINED_DIR / "stable-diffusion-v1-5" / "model_index.json",
         "sd-vae-ft-mse": PRETRAINED_DIR / "sd-vae-ft-mse" / "config.json",
         "image_encoder": PRETRAINED_DIR / "image_encoder" / "image_encoder" / "config.json",
-        "champ": PRETRAINED_DIR / "champ",
+        "champ denoising_unet": PRETRAINED_DIR / "champ" / "denoising_unet.pth",
+        "champ reference_unet": PRETRAINED_DIR / "champ" / "reference_unet.pth",
+        "champ motion_module": PRETRAINED_DIR / "champ" / "motion_module.pth",
+        "champ guidance depth": PRETRAINED_DIR / "champ" / "guidance_encoder_depth.pth",
+        "champ guidance dwpose": PRETRAINED_DIR / "champ" / "guidance_encoder_dwpose.pth",
+        "champ guidance normal": PRETRAINED_DIR / "champ" / "guidance_encoder_normal.pth",
+        "champ guidance semantic_map": PRETRAINED_DIR / "champ" / "guidance_encoder_semantic_map.pth",
         "dwpose detector": PRETRAINED_DIR / "dwpose" / "yolox_l.onnx",
         "dwpose pose": PRETRAINED_DIR / "dwpose" / "dw-ll_ucoco_384.onnx",
     }
@@ -257,7 +263,22 @@ def download_champ_models():
     )
 
     log("  -> Champ motion guidance weights")
-    snapshot("fudan-generative-ai/champ", PRETRAINED_DIR / "champ")
+    champ_dir = PRETRAINED_DIR / "champ"
+    champ_dir.mkdir(parents=True, exist_ok=True)
+    for filename in (
+        "champ/denoising_unet.pth",
+        "champ/reference_unet.pth",
+        "champ/motion_module.pth",
+        "champ/guidance_encoder_depth.pth",
+        "champ/guidance_encoder_dwpose.pth",
+        "champ/guidance_encoder_normal.pth",
+        "champ/guidance_encoder_semantic_map.pth",
+    ):
+        hf_hub_download(
+            repo_id="fudan-generative-ai/champ",
+            filename=filename,
+            local_dir=str(PRETRAINED_DIR),
+        )
 
     log("  -> DWPose weights")
     dwpose_dir = PRETRAINED_DIR / "dwpose"
