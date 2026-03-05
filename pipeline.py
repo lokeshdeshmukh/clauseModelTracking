@@ -266,7 +266,7 @@ def _render_champ_config(
             "",
             f"base_model_path: '{pretrained_dir / 'stable-diffusion-v1-5'}'",
             f"vae_model_path: '{pretrained_dir / 'sd-vae-ft-mse'}'",
-            f"image_encoder_path: '{pretrained_dir / 'image_encoder'}'",
+            f"image_encoder_path: '{pretrained_dir / 'image_encoder' / 'image_encoder'}'",
             f"ckpt_dir: '{pretrained_dir / 'champ'}'",
             f"motion_module_path: '{pretrained_dir / 'champ' / 'motion_module.pth'}'",
             "",

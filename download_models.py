@@ -153,7 +153,7 @@ def missing_champ_artifacts() -> list[str]:
     required = {
         "stable-diffusion-v1-5": PRETRAINED_DIR / "stable-diffusion-v1-5" / "model_index.json",
         "sd-vae-ft-mse": PRETRAINED_DIR / "sd-vae-ft-mse" / "config.json",
-        "image_encoder": PRETRAINED_DIR / "image_encoder" / "model_index.json",
+        "image_encoder": PRETRAINED_DIR / "image_encoder" / "image_encoder" / "config.json",
         "champ": PRETRAINED_DIR / "champ",
         "dwpose detector": PRETRAINED_DIR / "dwpose" / "yolox_l.onnx",
         "dwpose pose": PRETRAINED_DIR / "dwpose" / "dw-ll_ucoco_384.onnx",
