@@ -145,7 +145,13 @@ def _validate_motion_frames(subdir_path: Path, subdir_name: str):
             )
         try:
             with Image.open(frame_path) as image:
+                band_count = len(image.getbands())
                 image.verify()
+            if subdir_name == "semantic_map" and band_count < 3:
+                raise ValueError(
+                    f"Invalid semantic_map frame in '{subdir_name}': {frame_path}. "
+                    "Champ expects semantic_map images with 3 channels (RGB-like), not single-channel grayscale."
+                )
         except (UnidentifiedImageError, OSError) as exc:
             raise ValueError(
                 f"Invalid motion frame in '{subdir_name}': {frame_path}. "
