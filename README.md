@@ -52,6 +52,13 @@ docker run --rm your-docker-user/clause-model-tracking:runpod-v1 \
   python /workspace/scripts/verify_runtime.py
 ```
 
+Run the Champ inference-path smoke test as well:
+
+```bash
+docker run --rm your-docker-user/clause-model-tracking:runpod-v1 \
+  bash /workspace/scripts/smoke_inference.sh
+```
+
 This catches the most common image-level failures early:
 
 - broken Python imports for `torch`, `torchvision`, `torchaudio`, `detectron2`, `pytorch_lightning`, `dlib`

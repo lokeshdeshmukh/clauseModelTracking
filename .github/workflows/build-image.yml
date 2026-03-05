@@ -60,3 +60,6 @@ jobs:
 
       - name: Verify runtime image
         run: docker run --rm ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} python /workspace/scripts/verify_runtime.py
+
+      - name: Smoke check Champ inference path
+        run: docker run --rm ${{ env.IMAGE_NAME }}@${{ steps.build.outputs.digest }} bash /workspace/scripts/smoke_inference.sh
