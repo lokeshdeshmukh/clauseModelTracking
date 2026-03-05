@@ -7,21 +7,25 @@ python /workspace/champ/inference.py --help >/dev/null
 echo "[smoke] Champ inference imports are healthy"
 
 python - <<'PY'
-import base64
 import tempfile
 import zipfile
 from pathlib import Path
 
 from omegaconf import OmegaConf
+from PIL import Image
 
 import pipeline
 import runpod_handler
 
 
 required_motion_dirs = ("dwpose", "depth", "mask", "normal", "semantic_map")
-tiny_png = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7+F8QAAAAASUVORK5CYII="
-)
+def make_tiny_png_bytes() -> bytes:
+    with tempfile.TemporaryDirectory(prefix="champ-smoke-png-") as td:
+        path = Path(td) / "tiny.png"
+        Image.new("RGB", (2, 2), color=(0, 0, 0)).save(path, format="PNG")
+        return path.read_bytes()
+
+tiny_png = make_tiny_png_bytes()
 required_config_keys = (
     "data",
     "base_model_path",
