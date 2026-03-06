@@ -354,8 +354,13 @@ def _render_champ_config(
     steps: int,
     guidance_scale: float,
     seed: int,
+    max_frames: int = 48,
 ) -> str:
     pretrained_dir = CHAMP_DIR / "pretrained_models"
+    # frame_range clamps how many guidance frames Champ loads into the GPU at
+    # once. 180 frames at 512x768 fp16 easily OOMs a 16 GB card; 48 frames
+    # gives ~4–5 s of animation which is sufficient for most portrait clips.
+    frame_range_yaml = f"  frame_range: [0, {max_frames}]"
     return "\n".join(
         [
             "weight_dtype: 'fp16'",
@@ -365,7 +370,7 @@ def _render_champ_config(
             "data:",
             f"  ref_image_path: '{reference_photo}'",
             f"  guidance_data_folder: '{pose_dir}'",
-            "  frame_range: null",
+            frame_range_yaml,
             f"seed: {seed}",
             "",
             f"base_model_path: '{pretrained_dir / 'stable-diffusion-v1-5'}'",
@@ -517,6 +522,7 @@ def _write_champ_config(
     steps: int,
     guidance_scale: float,
     seed: int,
+    max_frames: int = 48,
 ) -> Path:
     config_path = output_dir / "champ_inference.yaml"
     config_path.write_text(
@@ -529,6 +535,7 @@ def _write_champ_config(
             steps=steps,
             guidance_scale=guidance_scale,
             seed=seed,
+            max_frames=max_frames,
         ),
         encoding="utf-8",
     )
@@ -541,12 +548,13 @@ def run_champ(
     output_dir: Path,
     width: int = 512,
     height: int = 768,
-    steps: int = 20,
+    steps: int = 10,
     guidance_scale: float = 3.5,
     seed: int = 42,
+    max_frames: int = 48,
 ) -> Path:
     """Run Champ inference to animate the reference photo using motion sequences."""
-    log.info("Stage 3: Champ body animation")
+    log.info("Stage 3: Champ body animation (max_frames=%d, steps=%d)", max_frames, steps)
     animated_dir = output_dir / "champ_output"
     animated_dir.mkdir(parents=True, exist_ok=True)
 
@@ -565,9 +573,18 @@ def run_champ(
         steps=steps,
         guidance_scale=guidance_scale,
         seed=seed,
+        max_frames=max_frames,
     )
 
-    run(["python", str(CHAMP_INFERENCE), "--config", str(config_path)], cwd=CHAMP_DIR)
+    # expandable_segments avoids CUDA allocator fragmentation which causes OOM
+    # when the reserved-but-unallocated pool can't satisfy a large contiguous
+    # allocation (the exact failure mode seen in production).
+    champ_env = {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    run(
+        ["python", str(CHAMP_INFERENCE), "--config", str(config_path)],
+        cwd=CHAMP_DIR,
+        env=champ_env,
+    )
 
     animated_video = _find_output_video(animated_dir)
     if animated_video is None:
@@ -687,13 +704,14 @@ def run_pipeline(
     output_dir: str | Path = OUTPUTS_DIR,
     width: int = 512,
     height: int = 768,
-    steps: int = 20,
+    steps: int = 10,
     guidance_scale: float = 3.5,
     seed: int = 42,
     motion_sequences_dir: Optional[str | Path] = None,
     audio_path: Optional[str | Path] = None,
     job_id: Optional[str] = None,
     keep_temp: bool = False,
+    max_champ_frames: int = 48,
 ) -> Path:
     """
     Run the full photo-to-video pipeline.
@@ -760,6 +778,7 @@ def run_pipeline(
             steps=steps,
             guidance_scale=guidance_scale,
             seed=seed,
+            max_frames=max_champ_frames,
         )
         final_video = run_retalking(animated_video, resolved_audio_path, job_dir)
     finally:
@@ -791,9 +810,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job_id", help="Optional stable job identifier")
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=768)
-    parser.add_argument("--steps", type=int, default=20)
+    parser.add_argument("--steps", type=int, default=10)
     parser.add_argument("--guidance_scale", type=float, default=3.5)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--max_champ_frames", type=int, default=48,
+        help="Max number of motion frames passed to Champ (caps GPU memory usage)",
+    )
     parser.add_argument("--keep_temp", action="store_true", help="Keep temp artifacts for debugging")
     return parser
 
@@ -814,5 +837,6 @@ if __name__ == "__main__":
         guidance_scale=args.guidance_scale,
         seed=args.seed,
         keep_temp=args.keep_temp,
+        max_champ_frames=args.max_champ_frames,
     )
     print(f"\nDone. Output saved to: {result}")

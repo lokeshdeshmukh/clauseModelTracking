@@ -505,10 +505,11 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
     width = int(payload.get("width", 512))
     height = int(payload.get("height", 768))
-    steps = int(payload.get("steps", 20))
+    steps = int(payload.get("steps", 10))
     guidance_scale = float(payload.get("guidance_scale", 3.5))
     seed = int(payload.get("seed", 42))
     keep_temp = _as_bool(payload.get("keep_temp", False))
+    max_champ_frames = int(payload.get("max_champ_frames", 48))
 
     output_path = run_pipeline(
         reference_photo=prepared["photo_path"],
@@ -523,6 +524,7 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
         guidance_scale=guidance_scale,
         seed=seed,
         keep_temp=keep_temp,
+        max_champ_frames=max_champ_frames,
     )
 
     result = {
