@@ -50,6 +50,32 @@ RUN rm -f /usr/local/bin/cmake /usr/local/bin/ctest /usr/local/bin/cpack \
 
 WORKDIR /workspace
 RUN git clone --depth 1 ${CHAMP_REPO} champ
+
+# Patch champ/inference.py: resize mask to match semantic_map dims before np.where
+# to avoid "shapes cannot be broadcast" errors when motion frames are slightly different sizes.
+RUN python3 - <<'PYEOF'
+import pathlib, re
+
+p = pathlib.Path("/workspace/champ/inference.py")
+src = p.read_text()
+
+old = "semantic_pil = Image.fromarray(np.where(mask_array > 0, semantic_array, 0))"
+new = (
+    "# Patch: align mask dims to semantic_map dims before broadcasting\n"
+    "        if mask_array.shape[:2] != semantic_array.shape[:2]:\n"
+    "            from PIL import Image as _PILImage\n"
+    "            _m = _PILImage.fromarray(mask_array).resize(\n"
+    "                (semantic_array.shape[1], semantic_array.shape[0]), _PILImage.NEAREST\n"
+    "            )\n"
+    "            mask_array = np.array(_m)\n"
+    "        semantic_pil = Image.fromarray(np.where(mask_array > 0, semantic_array, 0))"
+)
+
+assert old in src, "Pattern not found in champ/inference.py – patch needs updating!"
+p.write_text(src.replace(old, new))
+print("champ/inference.py patched successfully.")
+PYEOF
+
 WORKDIR /workspace/champ
 RUN grep -vE '^(torch|torchvision)==' requirements.txt > /tmp/champ-requirements.txt \
     && pip install -r /tmp/champ-requirements.txt
