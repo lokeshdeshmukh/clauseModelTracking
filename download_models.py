@@ -192,10 +192,28 @@ def smpl_model_present() -> bool:
     return (PRETRAINED_DIR / "smpl_models" / "SMPL_NEUTRAL.pkl").exists()
 
 
-def _download_file(url: str, destination: Path):
+def _download_file(url: str, destination: Path, retries: int = 3, timeout: int = 120):
+    """Download *url* to *destination* with retry/back-off and a per-attempt timeout."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with urllib.request.urlopen(url) as response:
-        destination.write_bytes(response.read())
+    last_exc: Exception = RuntimeError("no attempts made")
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as response:
+                destination.write_bytes(response.read())
+            return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < retries:
+                import time as _time
+                backoff = min(2 ** (attempt - 1), 16)
+                log(
+                    f"Download attempt {attempt}/{retries} failed: {exc}. "
+                    f"Retrying in {backoff}s…"
+                )
+                _time.sleep(backoff)
+    raise RuntimeError(
+        f"Failed to download {url} after {retries} attempts: {last_exc}"
+    ) from last_exc
 
 
 def _preprocess_env() -> dict[str, str]:

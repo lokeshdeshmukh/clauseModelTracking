@@ -241,19 +241,24 @@ def _upload_output_to_s3(path: Path, bucket: str, key: str) -> dict[str, Any]:
 def _upload_output_via_http(path: Path, upload_url: str, payload: dict[str, Any]) -> dict[str, Any]:
     method = str(_coalesce(payload, "output_upload_method") or "PUT").upper()
     extra_headers = payload.get("output_upload_headers") or {}
+    file_size = path.stat().st_size
     headers = {
         "Content-Type": mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        # Explicitly set Content-Length so the server and urllib don't need to
+        # buffer the whole body; this enables true streaming for large videos.
+        "Content-Length": str(file_size),
         **extra_headers,
     }
 
-    data = path.read_bytes()
-    request = urllib.request.Request(upload_url, data=data, method=method, headers=headers)
-    try:
-        with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
-            status_code = getattr(response, "status", response.getcode())
-    except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Output upload failed with HTTP {exc.code}: {body}") from exc
+    # Stream the file instead of loading it all into memory at once.
+    with path.open("rb") as fh:
+        request = urllib.request.Request(upload_url, data=fh, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS) as response:
+                status_code = getattr(response, "status", response.getcode())
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Output upload failed with HTTP {exc.code}: {body}") from exc
 
     return {
         "uploaded": True,

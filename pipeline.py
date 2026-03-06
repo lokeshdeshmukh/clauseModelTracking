@@ -215,26 +215,83 @@ def validate_inputs(
     log.info("Inputs validated.")
 
 
+def _probe_has_audio(video: Path) -> bool:
+    """Return True if the video file contains at least one audio stream."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-select_streams", "a:0",
+            "-show_entries", "stream=codec_type",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(video),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return bool(result.stdout.strip())
+
+
+def _get_video_duration(video: Path) -> float:
+    """Return the duration of a video in seconds, or 5.0 on failure."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            str(video),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    try:
+        return float(result.stdout.strip())
+    except (ValueError, AttributeError):
+        return 5.0
+
+
 def extract_audio(driving_video: Path, output_dir: Path) -> Path:
-    """Extract WAV audio from the driving video using FFmpeg."""
+    """Extract WAV audio from the driving video using FFmpeg.
+
+    If the video contains no audio stream a silent WAV of the same duration
+    is generated in its place so the rest of the pipeline can continue.
+    """
     log.info("Stage 1: extracting audio")
     audio_path = output_dir / "driving_audio.wav"
-    run(
-        [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(driving_video),
-            "-vn",
-            "-acodec",
-            "pcm_s16le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            str(audio_path),
-        ]
-    )
+
+    if _probe_has_audio(driving_video):
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                str(driving_video),
+                "-vn",
+                "-acodec",
+                "pcm_s16le",
+                "-ar",
+                "16000",
+                "-ac",
+                "1",
+                str(audio_path),
+            ]
+        )
+    else:
+        log.warning(
+            "Driving video has no audio stream; generating silent audio track instead."
+        )
+        duration = _get_video_duration(driving_video)
+        run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f", "lavfi",
+                "-i", "anullsrc=r=16000:cl=mono",
+                "-t", f"{duration:.3f}",
+                "-acodec", "pcm_s16le",
+                str(audio_path),
+            ]
+        )
+
     if not audio_path.exists():
         raise RuntimeError("Audio extraction failed: output file not created.")
     log.info("Audio extracted -> %s", audio_path)
@@ -488,6 +545,8 @@ def _stitch_frames_to_video(frames_dir: Path, output_dir: Path, fps: int = 25) -
             "glob",
             "-i",
             str(frames_dir / pattern),
+            # libx264 requires even dimensions; pad to nearest even pixel if needed
+            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
             "-c:v",
             "libx264",
             "-pix_fmt",

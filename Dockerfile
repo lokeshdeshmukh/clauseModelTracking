@@ -77,7 +77,12 @@ print("champ/inference.py patched successfully.")
 PYEOF
 
 WORKDIR /workspace/champ
-RUN grep -vE '^(torch|torchvision)==' requirements.txt > /tmp/champ-requirements.txt \
+# Strip torch, torchvision AND xformers from champ requirements:
+# xformers ships as a cu121 wheel on PyPI; we install cu118 torch so the
+# wheel from PyPI would be mismatched. xformers is disabled in our inference
+# config (enable_xformers_memory_efficient_attention: false) so omitting it
+# has no functional impact.
+RUN grep -vE '^(torch|torchvision|xformers)[=><!@]?' requirements.txt > /tmp/champ-requirements.txt \
     && pip install -r /tmp/champ-requirements.txt
 RUN git clone --depth 1 ${DWPose_REPO} DWPose
 
