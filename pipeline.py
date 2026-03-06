@@ -424,6 +424,90 @@ def _render_champ_config(
     )
 
 
+def _resize_reference_photo(photo: Path, width: int, height: int, output_dir: Path) -> Path:
+    """
+    Resize the reference photo to exactly (width, height) using a centre-crop
+    after scaling so the output always matches the Champ inference dimensions.
+    Both width and height are snapped to the nearest even integer so libx264
+    never complains about odd dimensions.
+    """
+    width = (width // 2) * 2
+    height = (height // 2) * 2
+    resized_path = output_dir / f"reference_photo_{width}x{height}.png"
+    if resized_path.exists():
+        return resized_path
+
+    with Image.open(photo) as img:
+        img = img.convert("RGB")
+        orig_w, orig_h = img.size
+        # If already the right size just copy it.
+        if (orig_w, orig_h) == (width, height):
+            img.save(resized_path)
+            return resized_path
+
+        # Scale so the shortest axis fills target, then centre-crop.
+        scale = max(width / orig_w, height / orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        left = (new_w - width) // 2
+        top = (new_h - height) // 2
+        img = img.crop((left, top, left + width, top + height))
+        img.save(resized_path)
+
+    log.info(
+        "Reference photo resized %dx%d -> %dx%d -> %s",
+        orig_w, orig_h, width, height, resized_path,
+    )
+    return resized_path
+
+
+def _ensure_video_resolution(video: Path, width: int, height: int, output_dir: Path) -> Path:
+    """
+    If *video* has a resolution larger than (width, height) in either dimension,
+    rescale it down (maintaining aspect ratio, even dims) before returning the path.
+    This prevents VideoRetalking from receiving a massive input.
+    """
+    try:
+        import subprocess as _sp, json as _json
+        probe = _sp.run(
+            [
+                "ffprobe", "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=width,height",
+                "-of", "json", str(video),
+            ],
+            capture_output=True, text=True,
+        )
+        info = _json.loads(probe.stdout)
+        vw = info["streams"][0]["width"]
+        vh = info["streams"][0]["height"]
+    except Exception:  # noqa: BLE001
+        return video
+
+    if vw <= width and vh <= height:
+        return video
+
+    scale = min(width / vw, height / vh)
+    tw = int(vw * scale // 2) * 2
+    th = int(vh * scale // 2) * 2
+    rescaled = output_dir / f"animated_body_{tw}x{th}.mp4"
+    log.info(
+        "Champ output %dx%d exceeds target %dx%d; rescaling to %dx%d before retalking.",
+        vw, vh, width, height, tw, th,
+    )
+    run(
+        [
+            "ffmpeg", "-y",
+            "-i", str(video),
+            "-vf", f"scale={tw}:{th}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+            str(rescaled),
+        ]
+    )
+    return rescaled
+
+
 def _write_champ_config(
     reference_photo: Path,
     pose_dir: Path,
@@ -466,8 +550,14 @@ def run_champ(
     animated_dir = output_dir / "champ_output"
     animated_dir.mkdir(parents=True, exist_ok=True)
 
+    # Resize the reference photo to the target dimensions upfront.
+    # Champ uses the image's native resolution for its output regardless of
+    # the width/height config values, so passing a large photo produces a
+    # massive output video that both OOMs and makes VideoRetalking crawl.
+    resized_photo = _resize_reference_photo(reference_photo, width, height, output_dir)
+
     config_path = _write_champ_config(
-        reference_photo=reference_photo,
+        reference_photo=resized_photo,
         pose_dir=pose_dir,
         output_dir=animated_dir,
         width=width,
@@ -501,6 +591,10 @@ def run_champ(
         if frame_dir is None:
             raise RuntimeError(f"Champ did not produce a video or frames under {animated_dir}")
         animated_video = _stitch_frames_to_video(frame_dir, output_dir)
+
+    # Safety net: if Champ still produced a large video (e.g. via imageio's
+    # own writer) rescale it down before VideoRetalking.
+    animated_video = _ensure_video_resolution(animated_video, width, height, output_dir)
 
     log.info("Champ animation complete -> %s", animated_video)
     return animated_video
