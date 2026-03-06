@@ -1,4 +1,4 @@
-FROM nvidia/cuda:11.8.0-cudnn8-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn9-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     PATH="/usr/local/cuda/bin:${PATH}" \
     LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}" \
-    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0" \
+    TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;8.9;9.0;12.0" \
     PIPELINE_WORKSPACE=/workspace \
     PIPELINE_OUTPUT_DIR=/workspace/outputs \
     PIPELINE_TEMP_DIR=/workspace/temp \
@@ -37,8 +37,8 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python \
     && python -m pip install --upgrade pip setuptools wheel
 
 RUN python -m pip install --retries 10 --timeout 120 \
-    torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
-    --extra-index-url https://download.pytorch.org/whl/cu118 \
+    torch==2.7.0+cu128 torchvision==0.22.0+cu128 torchaudio==2.7.0+cu128 \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
     --trusted-host download.pytorch.org
 
 # Triton pulls in the Python `cmake` wrapper into /usr/local/bin/cmake, which
@@ -78,11 +78,9 @@ print("champ/inference.py patched successfully.")
 PYEOF
 
 WORKDIR /workspace/champ
-# Strip torch, torchvision AND xformers from champ requirements:
-# xformers ships as a cu121 wheel on PyPI; we install cu118 torch so the
-# wheel from PyPI would be mismatched. xformers is disabled in our inference
-# config (enable_xformers_memory_efficient_attention: false) so omitting it
-# has no functional impact.
+# Strip torch, torchvision AND xformers from champ requirements.
+# xformers is disabled in our inference config and its PyPI wheels are
+# architecture-specific, so we always exclude it from repo requirements.
 RUN grep -vE '^(torch|torchvision|xformers)[=><!@]?' requirements.txt > /tmp/champ-requirements.txt \
     && pip install -r /tmp/champ-requirements.txt
 RUN git clone --depth 1 ${DWPose_REPO} DWPose
@@ -101,8 +99,8 @@ RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
     && CMAKE_ARGS="-DDLIB_USE_CUDA=0" pip install --verbose dlib==19.24.0
 
 RUN python -m pip install --force-reinstall --retries 10 --timeout 120 \
-    torch==2.2.2+cu118 torchvision==0.17.2+cu118 torchaudio==2.2.2+cu118 \
-    --extra-index-url https://download.pytorch.org/whl/cu118 \
+    torch==2.7.0+cu128 torchvision==0.22.0+cu128 torchaudio==2.7.0+cu128 \
+    --extra-index-url https://download.pytorch.org/whl/cu128 \
     --trusted-host download.pytorch.org
 
 RUN pip install \
