@@ -122,6 +122,33 @@ RUN pip install \
     gfpgan==1.3.8 \
     runpod==1.6.2
 
+# basicsr 1.4.2 imports rgb_to_grayscale from a torchvision path that was removed
+# in newer torchvision releases. Patch basicsr to the supported import location.
+RUN python3 - <<'PYEOF'
+from pathlib import Path
+import site
+
+old = "from torchvision.transforms.functional_tensor import rgb_to_grayscale"
+new = "from torchvision.transforms.functional import rgb_to_grayscale"
+
+patched = False
+for root in site.getsitepackages():
+    p = Path(root) / "basicsr" / "data" / "degradations.py"
+    if not p.exists():
+        continue
+    src = p.read_text()
+    if old in src:
+        p.write_text(src.replace(old, new))
+        print(f"Patched basicsr import in {p}")
+        patched = True
+    else:
+        print(f"No basicsr import patch needed in {p}")
+        patched = True
+
+if not patched:
+    raise SystemExit("Could not locate basicsr/data/degradations.py to patch")
+PYEOF
+
 WORKDIR /workspace
 RUN mkdir -p /workspace/scripts /workspace/configs /workspace/inputs /workspace/outputs /workspace/temp
 COPY scripts/ /workspace/scripts/
