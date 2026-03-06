@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.8.1-cudnn9-devel-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -37,7 +37,7 @@ RUN ln -sf /usr/bin/python3 /usr/bin/python \
     && python -m pip install --upgrade pip setuptools wheel
 
 RUN python -m pip install --retries 10 --timeout 120 \
-    torch==2.7.0+cu128 torchvision==0.22.0+cu128 torchaudio==2.7.0+cu128 \
+    torch==2.10.0+cu128 torchvision==0.25.0+cu128 torchaudio==2.10.0+cu128 \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --trusted-host download.pytorch.org
 
@@ -99,7 +99,7 @@ RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
     && CMAKE_ARGS="-DDLIB_USE_CUDA=0" pip install --verbose dlib==19.24.0
 
 RUN python -m pip install --force-reinstall --retries 10 --timeout 120 \
-    torch==2.7.0+cu128 torchvision==0.22.0+cu128 torchaudio==2.7.0+cu128 \
+    torch==2.10.0+cu128 torchvision==0.25.0+cu128 torchaudio==2.10.0+cu128 \
     --extra-index-url https://download.pytorch.org/whl/cu128 \
     --trusted-host download.pytorch.org
 
