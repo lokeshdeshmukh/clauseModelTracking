@@ -174,6 +174,7 @@ def missing_retalking_artifacts() -> list[str]:
         "GFPGANv1.3.pth": WEIGHTS_DIR / "GFPGANv1.3.pth",
         "RetinaFace-R50.pth": WEIGHTS_DIR / "RetinaFace-R50.pth",
         "shape_predictor_68_face_landmarks.dat": WEIGHTS_DIR / "shape_predictor_68_face_landmarks.dat",
+        "BFM similarity_Lm3D_all.mat": WEIGHTS_DIR / "BFM" / "similarity_Lm3D_all.mat",
     }
     return [name for name, path in required.items() if not path.exists()]
 
@@ -387,6 +388,22 @@ def download_retalking_models():
     if bfm_zip.exists():
         log("  -> Extracting BFM.zip")
         subprocess.run(["unzip", "-o", str(bfm_zip), "-d", str(WEIGHTS_DIR)], check=True)
+
+    # Some upstream weight mirrors expose BFM assets as files rather than a usable zip.
+    # Ensure the landmark template required by VideoRetalking exists.
+    bfm_similarity = WEIGHTS_DIR / "BFM" / "similarity_Lm3D_all.mat"
+    if not bfm_similarity.exists():
+        source_filename = (
+            "BFM/similarity_Lm3D_all.mat"
+            if RETALKING_WEIGHTS_REPO == "camenduru/video-retalking"
+            else "checkpoints/BFM/similarity_Lm3D_all.mat"
+        )
+        log("  -> Fetching missing BFM/similarity_Lm3D_all.mat")
+        hf_hub_download(
+            repo_id=RETALKING_WEIGHTS_REPO,
+            filename=source_filename,
+            local_dir=str(WEIGHTS_DIR if RETALKING_WEIGHTS_REPO == "camenduru/video-retalking" else RETALKING_DIR),
+        )
 
     log("VideoRetalking checkpoint download complete")
 
