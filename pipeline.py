@@ -687,8 +687,6 @@ def run_retalking(animated_video: Path, audio_path: Path, output_dir: Path) -> P
             str(final_video),
             "--LNet_batch_size",
             "16",
-            "--face_enhancer",
-            "gfpgan",
         ],
         cwd=RETALKING_DIR,
     )
