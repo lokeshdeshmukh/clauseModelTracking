@@ -93,6 +93,29 @@ RUN pip install --no-build-isolation git+https://github.com/mattloper/chumpy \
 
 WORKDIR /workspace
 RUN git clone --depth 1 ${RETALKING_REPO} video-retalking
+
+# Patch video-retalking preprocess.py: t may be a 2-D array (shape (1,2)) so
+# t[0] and t[1] are sub-arrays, not scalars, causing a ValueError when building
+# trans_params with np.array([...]).  Flatten t to 1-D first.
+RUN python3 - <<'PYEOF'
+import pathlib
+
+p = pathlib.Path("/workspace/video-retalking/third_part/face3d/util/preprocess.py")
+src = p.read_text()
+
+old = "    trans_params = np.array([w0, h0, s, t[0], t[1]])"
+new = (
+    "    # Patch: flatten t in case it is 2-D (e.g. shape (1,2)) so t[0]/t[1] are scalars\n"
+    "    import numpy as _np_patch\n"
+    "    t = _np_patch.array(t).flatten()\n"
+    "    trans_params = np.array([w0, h0, s, t[0], t[1]])"
+)
+
+assert old in src, f"Patch target not found in preprocess.py – update needed!\nFirst 2000 chars:\n{src[:2000]}"
+p.write_text(src.replace(old, new))
+print("video-retalking/third_part/face3d/util/preprocess.py patched successfully.")
+PYEOF
+
 WORKDIR /workspace/video-retalking
 RUN grep -v '^dlib==' requirements.txt > /tmp/video-retalking-requirements.txt \
     && pip install -r /tmp/video-retalking-requirements.txt \
