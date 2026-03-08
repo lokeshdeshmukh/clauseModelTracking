@@ -548,8 +548,8 @@ def run_champ(
     output_dir: Path,
     width: int = 512,
     height: int = 768,
-    steps: int = 10,
-    guidance_scale: float = 3.5,
+    steps: int = 25,
+    guidance_scale: float = 7.5,
     seed: int = 42,
     max_frames: int = 48,
 ) -> Path:
@@ -687,6 +687,8 @@ def run_retalking(animated_video: Path, audio_path: Path, output_dir: Path) -> P
             str(final_video),
             "--LNet_batch_size",
             "16",
+            "--face_enhancer",
+            "gfpgan",
         ],
         cwd=RETALKING_DIR,
     )
@@ -704,8 +706,8 @@ def run_pipeline(
     output_dir: str | Path = OUTPUTS_DIR,
     width: int = 512,
     height: int = 768,
-    steps: int = 10,
-    guidance_scale: float = 3.5,
+    steps: int = 25,
+    guidance_scale: float = 7.5,
     seed: int = 42,
     motion_sequences_dir: Optional[str | Path] = None,
     audio_path: Optional[str | Path] = None,
@@ -810,8 +812,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job_id", help="Optional stable job identifier")
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--height", type=int, default=768)
-    parser.add_argument("--steps", type=int, default=10)
-    parser.add_argument("--guidance_scale", type=float, default=3.5)
+    parser.add_argument("--steps", type=int, default=25)
+    parser.add_argument("--guidance_scale", type=float, default=7.5)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--max_champ_frames", type=int, default=48,

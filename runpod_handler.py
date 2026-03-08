@@ -505,8 +505,8 @@ def handler(job: dict[str, Any]) -> dict[str, Any]:
 
     width = int(payload.get("width", 512))
     height = int(payload.get("height", 768))
-    steps = int(payload.get("steps", 10))
-    guidance_scale = float(payload.get("guidance_scale", 3.5))
+    steps = int(payload.get("steps", 25))
+    guidance_scale = float(payload.get("guidance_scale", 7.5))
     seed = int(payload.get("seed", 42))
     keep_temp = _as_bool(payload.get("keep_temp", False))
     max_champ_frames = int(payload.get("max_champ_frames", 48))

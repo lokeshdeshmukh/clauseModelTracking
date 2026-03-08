@@ -6,8 +6,8 @@
     "use_champ_motions_example": true,
     "width": 512,
     "height": 768,
-    "steps": 20,
-    "guidance_scale": 3.5,
+    "steps": 25,
+    "guidance_scale": 7.5,
     "seed": 42,
     "return_base64": false
   }
